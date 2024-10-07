@@ -33,90 +33,27 @@ fn main() -> anyhow::Result<()> {
     log::info!("config = {}", config);
     config.set(&dev)?;
 
-    // let stream = dev.rx_stream::<num_complex::Complex<f32>>(&[config.channels])?;
     let mut stream = dev.rx_stream::<num_complex::Complex<f32>>(&[config.channels])?;
+    let mut _write_stream = dev.tx_stream::<num_complex::Complex<f32>>(&[config.channels])?;
+
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     let mut buffer = vec![num_complex::Complex::new(0., 0.); stream.mtu()?];
 
-    let mut bits = Vec::new();
-    let mut last_phase = 0.0;
-    let mut last_bit = 0;
-
     stream.activate(None)?;
+
     for _ in 0..5 {
         let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
 
         // FFT size is 1024
-        let fft_size = 1024;
-        let mut fft = rustfft::FftPlanner::new().plan_fft(fft_size, rustfft::FftDirection::Forward);
-
-        buffer
-            .windows(fft_size)
-            .step_by(fft_size / 2)
-            .for_each(|window| {
-                let mut input: Vec<num_complex::Complex<f32>> = window.iter().map(|&x| x).collect();
-                fft.process(&mut input);
-                // println!("{:?}", input.len());
-                // println!("{}", input[input.len() / 2].norm()); // 2426.0e6[Hz]の周波数成分の振幅を表示
-                let signal = input[input.len() / 2];
-                let phase = signal.arg();
-
-                let mut diff = phase - last_phase;
-                last_phase = phase;
-
-                // println!("diff: {}", diff);
-                if diff > std::f32::consts::PI {
-                    diff -= 2.0 * std::f32::consts::PI;
-                } else if diff < -std::f32::consts::PI {
-                    diff += 2.0 * std::f32::consts::PI;
-                }
-
-                /*
-                                let bit = if diff > 0.0 {
-                                    1 - last_bit
-                                } else {
-                                    last_bit
-                                };
-                */
-                let bit = if diff > 0.0 { 1 } else { 0 };
-
-                bits.push(bit);
-                last_bit = bit;
-            });
-
-        // println!();
-
-        // break; // for temporary testing
+        // let fft_size = 1024;
+        // let mut fft = rustfft::FftPlanner::new().plan_fft(fft_size, rustfft::FftDirection::Forward);
 
         if sb.caught() {
             break;
         }
     }
-
-    for offset in 0..8 {
-        println!("offset: {}", offset);
-        let bytes: Vec<u8> = bits
-            .iter()
-            .skip(offset)
-            .array_chunks::<8>()
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .enumerate()
-                    .fold(0, |acc, (i, &bit)| acc + (bit << i))
-            })
-            .collect();
-
-        // dump as hex
-        for byte in bytes {
-            print!("{:02x} ", byte);
-        }
-        println!();
-    }
-
     println!("read {} samples", buffer.len());
-    // for example,
 
     stream.deactivate(None)?;
 
@@ -150,5 +87,46 @@ impl fmt::Display for SDRConfig {
             "channels: {}, center_freq: {}, sample_rate: {}, bandwidth: {}, gain: {}",
             self.channels, self.center_freq, self.sample_rate, self.bandwidth, self.gain
         )
+    }
+}
+
+enum BufferState {
+    Empty,
+    InUse,
+    Ready,
+}
+
+struct WindowBuffer<'a, T: soapysdr::StreamSample> {
+    stream: &'a mut soapysdr::RxStream<T>,
+    internal_buffer: [Arc<Mutex<Vec<T>>>; 2],
+    buffer_states: Arc<Mutex<[BufferState; 2]>>,
+    windows_size: usize,
+}
+
+impl<'a, T: soapysdr::StreamSample> WindowBuffer<'a, T> {
+    const INTERNAL_BUFFER_SIZE: usize = 1024 * 128;
+
+    fn new(stream: &'a mut soapysdr::RxStream<T>, windows_size: usize) -> Self
+    where
+        T: Default + Clone, // FIXME
+    {
+        // let internal_buffer = vec![T::default(); Self::INTERNAL_BUFFER_SIZE];
+        let internal_buffer = [
+            Arc::new(Mutex::new(vec![T::default(); Self::INTERNAL_BUFFER_SIZE])),
+            Arc::new(Mutex::new(vec![T::default(); Self::INTERNAL_BUFFER_SIZE])),
+        ];
+
+        let buffer_states = Arc::new(Mutex::new([BufferState::Empty, BufferState::Empty]));
+
+        Self {
+            stream,
+            internal_buffer,
+            buffer_states,
+            windows_size,
+        }
+    }
+
+    fn start_read_thread(&self) -> anyhow::Result<()> {
+        let buffer_states = self.buffer_states.clone();
     }
 }
