@@ -42,12 +42,50 @@ fn main() -> anyhow::Result<()> {
 
     stream.activate(None)?;
 
-    for _ in 0..5 {
+    use std::io::{Write, BufWriter};
+    let mut file = BufWriter::new(std::fs::File::create("output.dat")?);
+
+    'outer: for _ in 0..5 {
         let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
 
         // FFT size is 1024
-        // let fft_size = 1024;
-        // let mut fft = rustfft::FftPlanner::new().plan_fft(fft_size, rustfft::FftDirection::Forward);
+        const BATCH_SIZE: usize = 4096;
+        let mut fft = rustfft::FftPlanner::new().plan_fft(BATCH_SIZE, rustfft::FftDirection::Inverse);
+
+        for chunk in buffer.chunks_mut(BATCH_SIZE) {
+            fft.process(chunk);
+
+            // translate this python code `np.abs(np.fft.fft(x))**2 / (N*Fs)`
+            let power = chunk.iter().map(|x| x.norm_sqr()).collect::<Vec<_>>();
+            let power = power.iter().map(|x| x / (BATCH_SIZE as f32 * config.sample_rate as f32)).collect::<Vec<_>>();
+
+            // make it log scale
+            let power = power.iter().map(|x| 10.0 * x.log10()).collect::<Vec<_>>();
+
+            let freq_step = config.sample_rate / BATCH_SIZE as f64;
+
+            // shift the zero frequency to the center
+            let mut power = power.iter().enumerate().map(|(i, x)| {
+                let i = if i < BATCH_SIZE / 2 {
+                    i as isize
+                } else {
+                    i as isize - BATCH_SIZE as isize
+                };
+                (i, x)
+            }).collect::<Vec<_>>();
+
+            // sort by frequency
+            power.sort_by(|a, b| a.0.cmp(&b.0));
+
+            // convert to frequency
+            let power = power.iter().map(|(i, x)| (*i as f64 * freq_step, *x)).collect::<Vec<_>>();
+
+            for p in power.iter() {
+                writeln!(file, "{} {}", p.0, p.1)?;
+            }
+
+            break 'outer;
+        }
 
         if sb.caught() {
             break;
@@ -87,46 +125,5 @@ impl fmt::Display for SDRConfig {
             "channels: {}, center_freq: {}, sample_rate: {}, bandwidth: {}, gain: {}",
             self.channels, self.center_freq, self.sample_rate, self.bandwidth, self.gain
         )
-    }
-}
-
-enum BufferState {
-    Empty,
-    InUse,
-    Ready,
-}
-
-struct WindowBuffer<'a, T: soapysdr::StreamSample> {
-    stream: &'a mut soapysdr::RxStream<T>,
-    internal_buffer: [Arc<Mutex<Vec<T>>>; 2],
-    buffer_states: Arc<Mutex<[BufferState; 2]>>,
-    windows_size: usize,
-}
-
-impl<'a, T: soapysdr::StreamSample> WindowBuffer<'a, T> {
-    const INTERNAL_BUFFER_SIZE: usize = 1024 * 128;
-
-    fn new(stream: &'a mut soapysdr::RxStream<T>, windows_size: usize) -> Self
-    where
-        T: Default + Clone, // FIXME
-    {
-        // let internal_buffer = vec![T::default(); Self::INTERNAL_BUFFER_SIZE];
-        let internal_buffer = [
-            Arc::new(Mutex::new(vec![T::default(); Self::INTERNAL_BUFFER_SIZE])),
-            Arc::new(Mutex::new(vec![T::default(); Self::INTERNAL_BUFFER_SIZE])),
-        ];
-
-        let buffer_states = Arc::new(Mutex::new([BufferState::Empty, BufferState::Empty]));
-
-        Self {
-            stream,
-            internal_buffer,
-            buffer_states,
-            windows_size,
-        }
-    }
-
-    fn start_read_thread(&self) -> anyhow::Result<()> {
-        let buffer_states = self.buffer_states.clone();
     }
 }
