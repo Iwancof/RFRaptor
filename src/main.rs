@@ -3,7 +3,7 @@
 use core::fmt;
 
 use anyhow::Context;
-use soapysdr::Direction::{Rx, Tx};
+use soapysdr::Direction::Rx;
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
@@ -39,59 +39,53 @@ fn main() -> anyhow::Result<()> {
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     let mut buffer = vec![num_complex::Complex::new(0., 0.); stream.mtu()?];
+    let mut burst = Burst::new();
 
     stream.activate(None)?;
 
-    use std::io::{Write, BufWriter};
-    let mut file = BufWriter::new(std::fs::File::create("output.dat")?);
+    let mut ignore_count = 100;
 
-    'outer: for _ in 0..5 {
+    '_outer: for _ in 0.. {
         let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+
+        assert_eq!(read, buffer.len());
 
         // FFT size is 1024
         const BATCH_SIZE: usize = 4096;
-        let mut fft = rustfft::FftPlanner::new().plan_fft(BATCH_SIZE, rustfft::FftDirection::Inverse);
+        let fft = rustfft::FftPlanner::new().plan_fft(BATCH_SIZE, rustfft::FftDirection::Inverse);
 
         for chunk in buffer.chunks_mut(BATCH_SIZE) {
             fft.process(chunk);
 
-            // translate this python code `np.abs(np.fft.fft(x))**2 / (N*Fs)`
-            let power = chunk.iter().map(|x| x.norm_sqr()).collect::<Vec<_>>();
-            let power = power.iter().map(|x| x / (BATCH_SIZE as f32 * config.sample_rate as f32)).collect::<Vec<_>>();
+            println!("{:?}", &chunk[..10]);
 
-            // make it log scale
-            let power = power.iter().map(|x| 10.0 * x.log10()).collect::<Vec<_>>();
-
-            let freq_step = config.sample_rate / BATCH_SIZE as f64;
-
-            // shift the zero frequency to the center
-            let mut power = power.iter().enumerate().map(|(i, x)| {
-                let i = if i < BATCH_SIZE / 2 {
-                    i as isize
-                } else {
-                    i as isize - BATCH_SIZE as isize
-                };
-                (i, x)
-            }).collect::<Vec<_>>();
-
-            // sort by frequency
-            power.sort_by(|a, b| a.0.cmp(&b.0));
-
-            // convert to frequency
-            let power = power.iter().map(|(i, x)| (*i as f64 * freq_step, *x)).collect::<Vec<_>>();
-
-            for p in power.iter() {
-                writeln!(file, "{} {}", p.0, p.1)?;
+            if ignore_count > 0 {
+                ignore_count -= 1;
+                continue;
             }
 
-            break 'outer;
+            let result = burst.catcher(chunk[512] / 20.);
+            match result as _ {
+                liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_SIGNALHI => {
+                    // println!("signalhi");
+                }
+                liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_RISE => {
+                    println!("rise");
+                }
+                liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_TIMEOUT => {
+                    println!("timeout");
+                }
+                x => {
+                    println!("unknown {}", x);
+                }
+            }
+
         }
 
         if sb.caught() {
             break;
         }
     }
-    println!("read {} samples", buffer.len());
 
     stream.deactivate(None)?;
 
@@ -125,5 +119,48 @@ impl fmt::Display for SDRConfig {
             "channels: {}, center_freq: {}, sample_rate: {}, bandwidth: {}, gain: {}",
             self.channels, self.center_freq, self.sample_rate, self.bandwidth, self.gain
         )
+    }
+}
+
+struct Burst {
+    crcf: liquid_dsp_bindings_sys::agc_crcf,
+    burst: Vec<num_complex::Complex<f32>>,
+}
+
+impl Burst {
+    pub fn new() -> Self {
+        use liquid_dsp_bindings_sys::*;
+        let crcf = unsafe {
+            let obj = agc_crcf_create();
+            agc_crcf_set_bandwidth(obj, 0.25);
+            agc_crcf_set_signal_level(obj, 1e-3);
+
+            agc_crcf_squelch_enable(obj);
+            agc_crcf_squelch_set_threshold(obj, -45.);
+            agc_crcf_squelch_set_timeout(obj, 100);
+            obj
+        };
+
+        Self {
+            crcf,
+            burst: Vec::new(),
+        }
+    }
+    pub fn catcher(&mut self, signal: num_complex::Complex<f32>) -> i32 {
+        use liquid_dsp_bindings_sys::*;
+        let mut value = __BindgenComplex {
+            re: signal.re,
+            im: signal.im,
+        };
+
+        unsafe { agc_crcf_execute(self.crcf as _, value, &mut value) };
+
+        unsafe { agc_crcf_squelch_get_status(self.crcf) }
+    }
+}
+
+impl Drop for Burst {
+    fn drop(&mut self) {
+        unsafe { liquid_dsp_bindings_sys::agc_crcf_destroy(self.crcf) };
     }
 }
