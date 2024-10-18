@@ -65,6 +65,8 @@ fn main() -> anyhow::Result<()> {
             buffer.as_mut_ptr(),
         );
 
+        // println!("{:?}", buffer);
+
         pfbch2_init(
             magic.as_mut_ptr(),
             channel as _,
@@ -78,6 +80,8 @@ fn main() -> anyhow::Result<()> {
     let mut magic = unsafe { magic.assume_init() };
     println!("{:?}", magic);
 
+    println!("{:?}", unsafe { *magic.w });
+
     let mut fsk = unsafe { fsk.assume_init() };
     println!("{:?}", fsk);
 
@@ -86,29 +90,53 @@ fn main() -> anyhow::Result<()> {
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
-    let mut buffer = vec![num_complex::Complex::<i8>::new(0, 0); stream.mtu()?];
-    let mut burst = (0..20)
-        .into_iter()
-        .map(|_| Burst::new())
-        .collect::<Vec<_>>();
-
     stream.activate(None)?;
 
     const BATCH_SIZE: usize = 4096;
 
-    // use std::io::{BufWriter, Write};
-    // let mut file = BufWriter::new(std::fs::File::create("signal.dat")?);
-
     let mut planner = rustfft::FftPlanner::new();
 
-    let mut fft_in_buffer = vec![Vec::with_capacity(BATCH_SIZE); 20];
+    let mut fft_in_buffer = Vec::with_capacity(BATCH_SIZE * 20);
     let mut output = vec![0i16; 96 * 2];
 
     create_catcher_threads();
 
+    let use_mock = false;
+
+    // let mut buffer = vec![num_complex::Complex::<i8>::new(0, 0); stream.mtu()?];
+    let mut buffer = Vec::with_capacity(4096 * 10 * 16);
     '_outer: for _ in 0.. {
-        let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
-        assert_eq!(read, buffer.len());
+        // let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+        // assert_eq!(read, buffer.len());
+
+        // read mock
+
+        if use_mock {
+            // let mut file = std::fs::File::open("raw.dat")?;
+            // raw.dat is like below
+            // -1 2\n
+            // 2 5\n
+            // ...
+            // re(i8) im(i8)\n
+
+            use std::fs::read_to_string;
+            buffer.clear();
+
+            for (_i, line) in read_to_string("../raw.dat")?.lines().enumerate() {
+                let mut iter = line.split_whitespace();
+                let re = iter.next().unwrap().parse::<i8>()?;
+                let im = iter.next().unwrap().parse::<i8>()?;
+
+                // buffer[i] = num_complex::Complex::new(re, im);
+                buffer.push(num_complex::Complex::new(re, im));
+            }
+
+            assert_eq!(buffer.len(), 4096 * 10 * 16);
+        } else {
+            buffer = vec![num_complex::Complex::<i8>::new(0, 0); stream.mtu()?];
+            let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+            assert_eq!(read, buffer.len());
+        }
 
         for chunk in buffer.chunks_mut(20 / 2) {
             unsafe {
@@ -116,6 +144,7 @@ fn main() -> anyhow::Result<()> {
                 let flat_chunk = chunk.as_mut_ptr() as *mut i8;
 
                 ice9_bindings::pfbch2_execute(
+                    // &mut magic as _,
                     &mut magic as _,
                     flat_chunk,
                     output.as_mut_ptr() as *mut i16,
@@ -125,69 +154,50 @@ fn main() -> anyhow::Result<()> {
             output[..20 * 2]
                 .array_chunks::<2>()
                 .enumerate()
-                .for_each(|(i, [re, im])| {
+                .for_each(|(_i, [re, im])| {
                     let re = *re as f32 / 32768.0;
                     let im = *im as f32 / 32768.0;
 
                     let signal = num_complex::Complex::new(re, im);
 
-                    fft_in_buffer[i].push(signal);
+                    // fft_in_buffer[i].push(signal);
+                    fft_in_buffer.push(signal);
                 });
 
-            for (i, fft_in) in (&mut fft_in_buffer[..20]).into_iter().enumerate() {
-                if fft_in.len() == BATCH_SIZE {
-                    let fft = planner.plan_fft_inverse(4096);
+            let fft = planner.plan_fft_inverse(20);
 
+            let mut fft_out_buffer = vec![Vec::with_capacity(4096); 20];
+
+            if fft_in_buffer.len() == BATCH_SIZE * 20 {
+                for (_batch_idx, fft_in) in fft_in_buffer.chunks_mut(20).enumerate() {
+                    // continue;
+
+                    // println!("in. {}: {:<20?}", batch_idx, &fft_in[0..4]);
                     fft.process(fft_in);
 
-                    FFT_SIGNAL_CHANNEL[i]
+                    for (i, fft_in) in fft_in.iter().enumerate() {
+                        fft_out_buffer[i].push(*fft_in);
+                    }
+                }
+
+                assert_eq!(fft_out_buffer.len(), 20);
+                assert_eq!(fft_out_buffer[0].len(), 4096);
+
+                for (channel_idx, fft_out) in fft_out_buffer.iter_mut().enumerate() {
+                    // println!("out. {}: {:?}", channel_idx, &fft_out[..3]);
+                    FFT_SIGNAL_CHANNEL[channel_idx]
                         .lock()
                         .unwrap()
-                        .extend_from_slice(fft_in);
-
-                    /*
-                                        for e in &*fft_in {
-                                            if let Some(mut packet) = burst[i].catcher(*e / 20 as f32)
-                                                && 132 <= packet.data.len()
-                                            {
-                                                // log::info!("packet {}. timestamp: {}", packet.data.len(), packet.timestamp);
-
-                                                unsafe {
-                                                    use ice9_bindings::*;
-
-                                                    let mut out = MaybeUninit::zeroed();
-                                                    fsk_demod(
-                                                        &mut fsk as _,
-                                                        packet.data.as_mut_ptr() as _,
-                                                        packet.data.len() as _,
-                                                        out.as_mut_ptr(),
-                                                    );
-
-                                                    let out = out.assume_init();
-
-                                                    if !out.demod.is_null() && !out.bits.is_null() {
-                                                        // println!("found: {:?}", out);
-                                                        let slice =
-                                                            std::slice::from_raw_parts(out.bits, out.bits_len as usize);
-                                                        println!(
-                                                            "idx = {}, {} {} {:?}",
-                                                            i,
-                                                            packet.timestamp,
-                                                            slice.len(),
-                                                            &slice[..40]
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
-                    */
+                        .extend_from_slice(fft_out);
                 }
+                // println!("done");
+
+                fft_in_buffer.clear();
             }
-            for (i, fft_in) in (&mut fft_in_buffer).into_iter().enumerate() {
-                if fft_in.len() == BATCH_SIZE {
-                    fft_in.clear();
-                }
-            }
+        }
+        if use_mock {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            return Ok(());
         }
 
         if sb.caught() {
@@ -321,6 +331,7 @@ impl Burst {
     pub fn catcher(&mut self, signal: num_complex::Complex<f32>) -> Option<Packet> {
         let (signal, status) = self.crcf.execute(signal);
 
+        // println!("{:?}", status);
         match status {
             SquelchStatus::Rise => {
                 self.in_burst = true;
@@ -338,7 +349,9 @@ impl Burst {
                     timestamp: Utc::now(),
                 });
             }
-            _ => {}
+            _x => {
+                // println!("other: {:?}", x);
+            }
         }
 
         None
@@ -376,75 +389,100 @@ fn create_catcher_threads() {
                     continue;
                 }
 
-                for s in &tmp {
-                    if let Some(mut packet) = burst.catcher(s / 20 as f32)
-                        && 132 <= packet.data.len()
-                    {
+                if i == 15 || true {
+                    for agc_array in tmp.chunks(4096) {
                         /*
-                        log::info!(
-                            "packet {}. timestamp: {}. idx: {}",
-                            packet.data.len(),
-                            packet.timestamp,
-                            i
-                        );
+                                                print!("{}: ", i);
+                                                print_complex_vec(
+                                                    &agc_array[..4]
+                                                        .iter()
+                                                        .map(|x| *x / 20 as f32)
+                                                        .collect::<Vec<_>>(),
+                                                );
                         */
+                        for s in agc_array {
+                            if let Some(mut packet) = burst.catcher(s / 20 as f32) {
+                                if packet.data.len() < 132 {
+                                    continue;
+                                }
+                                log::info!(
+                                    "packet {}. timestamp: {}. idx: {}",
+                                    packet.data.len(),
+                                    packet.timestamp,
+                                    i
+                                );
 
-                        unsafe {
-                            use ice9_bindings::*;
+                                unsafe {
+                                    use ice9_bindings::*;
 
-                            let mut out = MaybeUninit::zeroed();
-                            fsk_demod(
-                                &mut fsk as _,
-                                packet.data.as_mut_ptr() as _,
-                                packet.data.len() as _,
-                                out.as_mut_ptr(),
-                            );
-
-                            let out = out.assume_init();
-
-                            if !out.demod.is_null() && !out.bits.is_null() {
-                                // println!("found: {:?}", out);
-                                let slice: &mut [u8] =
-                                    std::slice::from_raw_parts_mut(out.bits, out.bits_len as usize);
-                                /*
-                                                                println!(
-                                                                    "idx = {}, {} {} {:?}",
-                                                                    i,
-                                                                    packet.timestamp,
-                                                                    slice.len(),
-                                                                    &slice[..40]
-                                                                );
-                                */
-
-                                /*
-                                                                if &slice[..6] == &[0, 1, 0, 1, 0, 1] {
-                                                                    println!("found preamble");
-                                                                }
-                                */
-
-                                use ice9_bindings::*;
-
-                                let lap =
-                                    btbb_find_ac(slice.as_mut_ptr() as _, slice.len() as _, 1);
-                                // println!("lap = {:?}", lap);
-
-                                if lap != 0xffffffff {
-                                    let p = ble_easy(
-                                        slice.as_mut_ptr() as _,
-                                        slice.len() as _,
-                                        (2441 + if i < 10 { i } else { i - 20 }) as _,
+                                    let mut out = MaybeUninit::zeroed();
+                                    fsk_demod(
+                                        &mut fsk as _,
+                                        packet.data.as_mut_ptr() as _,
+                                        packet.data.len() as _,
+                                        out.as_mut_ptr(),
                                     );
 
-                                    println!("p = {:?}", *p);
+                                    let out = out.assume_init();
+
+                                    if !out.demod.is_null() && !out.bits.is_null() {
+                                        // println!("found: {:?}", out);
+                                        let slice: &mut [u8] = std::slice::from_raw_parts_mut(
+                                            out.bits,
+                                            out.bits_len as usize,
+                                        );
+                                        println!(
+                                            "idx = {}, {} {} {:?}",
+                                            i,
+                                            packet.timestamp,
+                                            slice.len(),
+                                            &slice[..40]
+                                        );
+
+                                        /*
+                                                                        if &slice[..6] == &[0, 1, 0, 1, 0, 1] {
+                                                                            println!("found preamble");
+                                                                        }
+                                        */
+
+                                        use ice9_bindings::*;
+
+                                        let lap = btbb_find_ac(
+                                            slice.as_mut_ptr() as _,
+                                            slice.len() as _,
+                                            1,
+                                        );
+                                        // println!("lap = {:?}", lap);
+
+                                        if lap != 0xffffffff {
+                                            let p = ble_easy(
+                                                slice.as_mut_ptr() as _,
+                                                slice.len() as _,
+                                                (2441 + if i < 10 { i } else { i - 20 }) as _,
+                                            );
+
+                                            println!("p = {:?}", *p);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+
+                // println!("{}", tmp.len());
                 // tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                 tmp.clear();
             }
         });
     }
+}
+
+fn print_complex_vec(v: &[num_complex::Complex<f32>]) {
+    print!("[");
+    for x in v.iter() {
+        print!("{:.6}, ", x);
+    }
+    println!("]");
 }
