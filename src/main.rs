@@ -101,10 +101,12 @@ fn main() -> anyhow::Result<()> {
 
     create_catcher_threads();
 
-    let use_mock = false;
+    const MOCK_SIZE: usize = 4096 * 10 * 4096;
+
+    let use_mock = true;
 
     // let mut buffer = vec![num_complex::Complex::<i8>::new(0, 0); stream.mtu()?];
-    let mut buffer = Vec::with_capacity(4096 * 10 * 16);
+    let mut buffer = Vec::with_capacity(MOCK_SIZE);
     '_outer: for _ in 0.. {
         // let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         // assert_eq!(read, buffer.len());
@@ -131,7 +133,7 @@ fn main() -> anyhow::Result<()> {
                 buffer.push(num_complex::Complex::new(re, im));
             }
 
-            assert_eq!(buffer.len(), 4096 * 10 * 16);
+            assert_eq!(buffer.len(), MOCK_SIZE);
         } else {
             buffer = vec![num_complex::Complex::<i8>::new(0, 0); stream.mtu()?];
             let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
@@ -389,79 +391,89 @@ fn create_catcher_threads() {
                     continue;
                 }
 
-                if i == 15 || true {
-                    for agc_array in tmp.chunks(4096) {
-                        /*
-                                                print!("{}: ", i);
-                                                print_complex_vec(
-                                                    &agc_array[..4]
-                                                        .iter()
-                                                        .map(|x| *x / 20 as f32)
-                                                        .collect::<Vec<_>>(),
-                                                );
-                        */
-                        for s in agc_array {
-                            if let Some(mut packet) = burst.catcher(s / 20 as f32) {
-                                if packet.data.len() < 132 {
-                                    continue;
-                                }
-                                log::info!(
-                                    "packet {}. timestamp: {}. idx: {}",
-                                    packet.data.len(),
-                                    packet.timestamp,
-                                    i
+                for agc_array in tmp.chunks(4096) {
+                    /*
+                                            print!("{}: ", i);
+                                            print_complex_vec(
+                                                &agc_array[..4]
+                                                    .iter()
+                                                    .map(|x| *x / 20 as f32)
+                                                    .collect::<Vec<_>>(),
+                                            );
+                    */
+                    for s in agc_array {
+                        if let Some(mut packet) = burst.catcher(s / 20 as f32) {
+                            if packet.data.len() < 132 {
+                                continue;
+                            }
+                            /*
+                                                        log::info!(
+                                                            "packet {}. timestamp: {}. idx: {}",
+                                                            packet.data.len(),
+                                                            packet.timestamp,
+                                                            i
+                                                        );
+                            */
+
+                            unsafe {
+                                use ice9_bindings::*;
+
+                                let mut out = MaybeUninit::zeroed();
+                                fsk_demod(
+                                    &mut fsk as _,
+                                    packet.data.as_mut_ptr() as _,
+                                    packet.data.len() as _,
+                                    out.as_mut_ptr(),
                                 );
 
-                                unsafe {
-                                    use ice9_bindings::*;
+                                let out = out.assume_init();
 
-                                    let mut out = MaybeUninit::zeroed();
-                                    fsk_demod(
-                                        &mut fsk as _,
-                                        packet.data.as_mut_ptr() as _,
-                                        packet.data.len() as _,
-                                        out.as_mut_ptr(),
+                                if !out.demod.is_null() && !out.bits.is_null() {
+                                    // println!("found: {:?}", out);
+                                    let slice: &mut [u8] = std::slice::from_raw_parts_mut(
+                                        out.bits,
+                                        out.bits_len as usize,
                                     );
 
-                                    let out = out.assume_init();
+                                    /*
+                                                                        println!(
+                                                                            "idx = {}, {} {} {:?}",
+                                                                            i,
+                                                                            packet.timestamp,
+                                                                            slice.len(),
+                                                                            &slice[..40]
+                                                                        );
+                                    */
 
-                                    if !out.demod.is_null() && !out.bits.is_null() {
-                                        // println!("found: {:?}", out);
-                                        let slice: &mut [u8] = std::slice::from_raw_parts_mut(
-                                            out.bits,
-                                            out.bits_len as usize,
-                                        );
-                                        println!(
-                                            "idx = {}, {} {} {:?}",
-                                            i,
-                                            packet.timestamp,
-                                            slice.len(),
-                                            &slice[..40]
-                                        );
+                                    /*
+                                                                    if &slice[..6] == &[0, 1, 0, 1, 0, 1] {
+                                                                        println!("found preamble");
+                                                                    }
+                                    */
 
-                                        /*
-                                                                        if &slice[..6] == &[0, 1, 0, 1, 0, 1] {
-                                                                            println!("found preamble");
-                                                                        }
-                                        */
+                                    use ice9_bindings::*;
 
-                                        use ice9_bindings::*;
+                                    let lap =
+                                        btbb_find_ac(slice.as_mut_ptr() as _, slice.len() as _, 1);
+                                    // println!("lap = {:?}", lap);
 
-                                        let lap = btbb_find_ac(
+                                    if lap == 0xffffffff {
+                                        let p = ble_easy(
                                             slice.as_mut_ptr() as _,
                                             slice.len() as _,
-                                            1,
+                                            (2441 + if i < 10 { i } else { i - 20 }) as _,
                                         );
-                                        // println!("lap = {:?}", lap);
 
-                                        if lap != 0xffffffff {
-                                            let p = ble_easy(
-                                                slice.as_mut_ptr() as _,
-                                                slice.len() as _,
-                                                (2441 + if i < 10 { i } else { i - 20 }) as _,
-                                            );
+                                        if !p.is_null() {
+                                            let len = (*p).len as usize;
+                                            let slice = (*p).data.as_slice(len);
 
-                                            println!("p = {:?}", *p);
+
+                                            let flag = slice[4] & 0b1111;
+                                            if flag == 0 || flag == 2 {
+                                                println!("mac = {:.x?}", &slice[6..(6 + 6)]);
+                                                // println!("found macaddress: xx:xx:xx:xx:xx:xx");
+                                            }
                                         }
                                     }
                                 }
