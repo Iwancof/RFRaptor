@@ -85,7 +85,6 @@ async fn main() -> anyhow::Result<()> {
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
-
     const BATCH_SIZE: usize = 4096;
 
     let mut planner = rustfft::FftPlanner::new();
@@ -95,47 +94,16 @@ async fn main() -> anyhow::Result<()> {
 
     create_catcher_threads();
 
-    const MOCK_SIZE: usize = 4096 * 10 * 4096;
-
-    let use_mock = false;
-
-    // let mut buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?];
-    let mut buffer = Vec::with_capacity(MOCK_SIZE);
-
-    use std::fs::read_to_string;
-    let mut mock_data_iterator = None;
-    let mut mock_string = None;
-
-    if use_mock {
-        mock_string = Some(read_to_string("../raw.dat")?);
-        mock_data_iterator = Some(mock_string.as_ref().unwrap().lines());
-    }
-
-    let mut num_read_mock = 0;
-
     let fft = planner.plan_fft_inverse(20);
+
+
+    // fixed size buffer
+    let mut buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?].into_boxed_slice(); 
 
     stream.activate(None)?;
     '_outer: for _ in 0.. {
-        if use_mock {
-            buffer.clear();
-
-            for line in mock_data_iterator.as_mut().unwrap().take(131072) {
-                let mut iter = line.split_whitespace();
-                let re = iter.next().unwrap().parse::<i8>()?;
-                let im = iter.next().unwrap().parse::<i8>()?;
-
-                // buffer[i] = Complex::new(re, im);
-                buffer.push(Complex::new(re, im));
-            }
-
-            assert_eq!(buffer.len(), 131072);
-            num_read_mock += buffer.len();
-        } else {
-            buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?];
-            let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
-            assert_eq!(read, buffer.len());
-        }
+        let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+        assert_eq!(read, buffer.len());
 
         for chunk in buffer.chunks_mut(20 / 2) {
             if chunk.len() != 20 / 2 {
@@ -178,10 +146,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        if use_mock && num_read_mock >= MOCK_SIZE {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            return Ok(());
-        }
         if sb.caught() {
             break;
         }
