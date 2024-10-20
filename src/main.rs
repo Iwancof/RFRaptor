@@ -90,11 +90,10 @@ async fn main() -> anyhow::Result<()> {
     let mut planner = rustfft::FftPlanner::new();
 
     let mut fft_in_buffer = Vec::with_capacity(BATCH_SIZE * 20);
-    let mut output = vec![0i16; 96 * 2];
-
-    create_catcher_threads();
 
     let fft = planner.plan_fft_inverse(20);
+
+    create_catcher_threads();
 
 
     // fixed size buffer
@@ -110,13 +109,8 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
 
-            channelizer::channelize(&mut magic, chunk, &mut output);
-
-            output[..20 * 2].array_chunks::<2>().for_each(|[re, im]| {
-                let re = *re as f32 / 32768.0;
-                let im = *im as f32 / 32768.0;
-                fft_in_buffer.push(Complex::new(re, im));
-            });
+            let output = channelizer::channelize(&mut magic, chunk);
+            fft_in_buffer.extend_from_slice(&output);
 
             if fft_in_buffer.len() == BATCH_SIZE * 20 {
                 let mut fft_out_buffer = vec![Vec::with_capacity(4096); 20];
@@ -140,7 +134,6 @@ async fn main() -> anyhow::Result<()> {
                         append_target.extend_from_slice(fft_out);
                     }
                 }
-                // println!("done");
 
                 fft_in_buffer.clear();
             }
