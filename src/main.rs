@@ -15,17 +15,17 @@ use fsk::FskDemod;
 use sdr::SDRConfig;
 
 use anyhow::Context;
-
 use core::mem::MaybeUninit;
 
 use num_complex::Complex;
+
+use tungstenite::accept;
 
 // Config at runtime
 static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
     const { std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::Mutex::new(None))) };
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
-// #[tokio::main]
 fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
@@ -108,6 +108,7 @@ fn main() -> anyhow::Result<()> {
     let mut buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?].into_boxed_slice();
 
     create_catcher_threads();
+    start_websocket()?;
 
     stream.activate(None)?;
     '_outer: for _ in 0.. {
@@ -188,7 +189,6 @@ fn create_catcher_threads() {
 
     for ble_ch_idx in first_live..=last_live {
         let freq = 2402 + 2 * ble_ch_idx as u32;
-        // tokio::spawn(async move {
         std::thread::spawn(move || {
             let mut burst = Burst::new();
             let mut fsk = FskDemod::new();
@@ -214,10 +214,14 @@ fn create_catcher_threads() {
                         }
                         if let Some(out) = fsk.demod(&packet.data) {
                             if let Ok(bt) = bluetooth::Bluetooth::from_packet(&out, freq) {
-                                if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                                if let bluetooth::BluetoothPacket::Advertisement(ref adv) =
+                                    bt.packet
+                                {
                                     // println!("{}. remain: {:x?}", adv, bt.remain);
                                     log::info!("{}. remain: {:x?}", adv, bt.remain);
                                 }
+
+                                PACKETS.lock().unwrap().push_back(bt);
                             }
                         }
                     }
@@ -227,4 +231,54 @@ fn create_catcher_threads() {
             }
         });
     }
+}
+
+static PACKETS: std::sync::LazyLock<
+    std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<bluetooth::Bluetooth>>>,
+> = const {
+    std::sync::LazyLock::new(|| {
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()))
+    })
+};
+
+fn start_websocket() -> anyhow::Result<()> {
+    let server = std::net::TcpListener::bind("127.0.0.1:8080")?;
+
+    std::thread::spawn(move || {
+        for stream in server.incoming() {
+            let stream = stream.unwrap();
+            std::thread::spawn(move || {
+                let mut ws = accept(stream).unwrap();
+
+                loop {
+                    let bt = PACKETS.lock().unwrap().pop_front();
+
+                    if let Some(bt) = bt {
+                        #[allow(non_snake_case)]
+                        #[derive(serde_derive::Serialize)]
+                        struct Message {
+                            mac: String,
+                            packetInfo: String,
+                            packetBytes: String,
+                        }
+
+                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                            let msg = Message {
+                                mac: format!("{}", adv.address),
+                                packetInfo: format!("{}", adv),
+                                packetBytes: format!("{:x?}", bt.bytes),
+                            };
+
+                            ws.send(tungstenite::Message::Text(
+                                serde_json::to_string(&msg).unwrap(),
+                            ))
+                            .unwrap();
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    Ok(())
 }
