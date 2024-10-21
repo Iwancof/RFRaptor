@@ -214,15 +214,9 @@ fn create_catcher_threads() {
                         }
                         if let Some(out) = fsk.demod(&packet.data) {
                             if let Ok(bt) = bluetooth::Bluetooth::from_packet(&out, freq) {
-                                let flag = bt.bytes[4] & 0b1111;
-                                if flag == 0 || flag == 2 {
-                                    let mut mac = bt.bytes[6..(6 + 6)].to_vec();
-                                    mac.reverse();
-
-                                    println!(
-                                        "mac = {:2x?}, freq = {}, data = {:x?}",
-                                        mac, freq, &bt.bytes
-                                    );
+                                if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                                    // println!("{}. remain: {:x?}", adv, bt.remain);
+                                    log::info!("{}. remain: {:x?}", adv, bt.remain);
                                 }
                             }
                         }
