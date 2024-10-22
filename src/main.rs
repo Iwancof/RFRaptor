@@ -54,36 +54,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("config = {}", config);
     config.set(&dev)?;
 
-    let mut magic: MaybeUninit<ice9_bindings::pfbch2_t> = MaybeUninit::uninit();
-
-    // initialize ice9 bindings
-    unsafe {
-        use ice9_bindings::*;
-
-        let channel = 20;
-        let m = 4;
-        let lp_cutoff = 0.75;
-
-        let h_len = 2 * channel * m + 1;
-        let mut buffer = vec![0.0; h_len].into_boxed_slice();
-
-        liquid_dsp_bindings_sys::liquid_firdes_kaiser(
-            h_len as _,
-            lp_cutoff / channel as f32,
-            60.0,
-            0.0,
-            buffer.as_mut_ptr(),
-        );
-
-        pfbch2_init(
-            magic.as_mut_ptr(),
-            channel as _,
-            m as _,
-            buffer.as_mut_ptr(),
-        );
-    }
-
-    let mut magic = unsafe { magic.assume_init() };
+    let mut magic = channelizer::Channelizer::new(20, 4, 0.75);
 
     let mut stream = dev.rx_stream::<Complex<i8>>(&[config.channels])?;
 
@@ -120,7 +91,7 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
 
-            let output = channelizer::channelize(&mut magic, chunk);
+            let output = magic.channelize(chunk);
             fft_in_buffer.extend_from_slice(&output);
 
             if fft_in_buffer.len() == BATCH_SIZE * 20 {
