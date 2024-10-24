@@ -60,13 +60,6 @@ fn main() -> anyhow::Result<()> {
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
-    const BATCH_SIZE: usize = 4096;
-
-    let mut planner = rustfft::FftPlanner::new();
-
-    let mut fft_in_buffer = Vec::with_capacity(BATCH_SIZE * 20);
-    let fft = planner.plan_fft_inverse(20);
-
     let mut is_buffer_valid = [false; 96];
     for i in 0..20 {
         let freq = (2427 as isize + if i < 10 { i } else { -20 + i }) as usize;
@@ -86,39 +79,11 @@ fn main() -> anyhow::Result<()> {
         let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         assert_eq!(read, buffer.len());
 
-        for chunk in buffer.chunks_mut(20 / 2) {
-            if chunk.len() != 20 / 2 {
-                continue;
-            }
-
-            let output = magic.channelize(chunk);
-            fft_in_buffer.extend_from_slice(&output);
-
-            if fft_in_buffer.len() == BATCH_SIZE * 20 {
-                let mut fft_out_buffer = vec![Vec::with_capacity(4096); 20];
-
-                for fft_working in fft_in_buffer.chunks_mut(20) {
-                    fft.process(fft_working);
-
-                    for (i, fft_in) in fft_working.iter().enumerate() {
-                        fft_out_buffer[i].push(*fft_in);
-                    }
+        for chunk in buffer.chunks_exact_mut(20 / 2) {
+            for (ch_idx, fft_in) in magic.channelize_fft(chunk).iter().enumerate() {
+                if is_buffer_valid[ch_idx] {
+                    FFT_SIGNAL_CHANNEL[ch_idx].lock().unwrap().push(*fft_in);
                 }
-
-                assert_eq!(fft_out_buffer.len(), 20);
-                assert_eq!(fft_out_buffer[0].len(), 4096);
-
-                for (channel_idx, fft_out) in fft_out_buffer.iter_mut().enumerate() {
-                    if !is_buffer_valid[channel_idx] {
-                        continue;
-                    }
-                    FFT_SIGNAL_CHANNEL[channel_idx]
-                        .lock()
-                        .unwrap()
-                        .extend_from_slice(fft_out);
-                }
-
-                fft_in_buffer.clear();
             }
         }
 
@@ -189,7 +154,12 @@ fn create_catcher_threads() {
                                     bt.packet
                                 {
                                     // println!("{}. remain: {:x?}", adv, bt.remain);
-                                    log::info!("{}. remain: {:x?}", adv, bt.remain);
+
+                                    log::info!(
+                                        "{}. remain: {}",
+                                        adv,
+                                        byte_to_ascii_string(&bt.remain)
+                                    );
                                 }
 
                                 PACKETS.lock().unwrap().push_back(bt);
@@ -252,4 +222,18 @@ fn start_websocket() -> anyhow::Result<()> {
     });
 
     Ok(())
+}
+
+fn byte_to_ascii_string(bytes: &[u8]) -> String {
+    let mut ret = String::new();
+
+    for b in bytes {
+        if b.is_ascii_alphanumeric() {
+            ret.push(*b as char);
+        } else {
+            ret.push_str(&format!("\\x{:02x}", b));
+        }
+    }
+
+    ret
 }

@@ -35,3 +35,7 @@ tungstenite = "0.24.0"
 ice9 = []
 
 default = ["ice9"]
+
+[dev-dependencies]
+approx = { version = "0.5.1", features = ["num-complex"] }
+rand = { version = "0.8.5", features = ["small_rng"] }

@@ -2,12 +2,15 @@ use ice9_bindings::{_pfbch2_t, pfbch2_execute, pfbch2_init};
 
 use num_complex::Complex;
 
+// TODO: FFTを追加する
 pub struct Channelizer {
     #[cfg(feature = "ice9")]
     magic: ice9_bindings::_pfbch2_t,
 
     #[cfg(not(feature = "ice9"))]
     magic: (),
+
+    fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
 }
 
 impl Channelizer {
@@ -30,8 +33,11 @@ impl Channelizer {
 
         drop(filter);
 
+        let mut planner = rustfft::FftPlanner::new();
+
         Self {
             magic: unsafe { magic.assume_init() },
+            fft: planner.plan_fft_inverse(channel),
         }
     }
 
@@ -42,8 +48,8 @@ impl Channelizer {
 
     #[cfg(feature = "ice9")]
     pub fn channelize(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
-        assert_eq!(input.len(), 20 / 2);
-        let mut output = Vec::with_capacity(20);
+        assert_eq!(input.len(), self.magic.M2 as usize);
+        let mut output = Vec::with_capacity(self.magic.M2 as usize);
 
         // SAFETY: Complex<T> has `repr(C)` layout
         let flat_chunk = input.as_ptr() as *mut i8;
@@ -57,13 +63,22 @@ impl Channelizer {
             );
         }
 
-        working[..20 * 2].array_chunks::<2>().for_each(|[re, im]| {
-            let re = *re as f32 / 32768.0;
-            let im = *im as f32 / 32768.0;
-            output.push(Complex::new(re, im));
-        });
+        working[..self.magic.M as usize * 2]
+            .array_chunks::<2>()
+            .for_each(|[re, im]| {
+                let re = *re as f32 / 32768.0;
+                let im = *im as f32 / 32768.0;
+                output.push(Complex::new(re, im));
+            });
 
         output
+    }
+
+    pub fn channelize_fft(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
+        let mut working = self.channelize(input);
+        self.fft.process(&mut working);
+
+        working
     }
 }
 
@@ -81,7 +96,7 @@ fn generate_filter(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
     let mut buffer = vec![0.0; h_len];
 
     unsafe {
-        let r = liquid_dsp_bindings_sys::liquid_firdes_kaiser(
+        liquid_dsp_bindings_sys::liquid_firdes_kaiser(
             h_len as _,
             lp_cutoff / channel as f32,
             60.0,
@@ -96,7 +111,28 @@ fn generate_filter(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use approx::relative_eq;
+    use rand::{Rng, SeedableRng};
 
-    // #[test]
-    // fn test_random
+    include!("./channelizer_define_test.rs");
+
+    #[test]
+    fn channelize_once() {
+        let channel = 20;
+        let m = 4;
+        let lp_cutoff = 0.75;
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let mut magic = Channelizer::new(channel, m, lp_cutoff);
+        let data = (0..10)
+            .map(|_| Complex::new(rng.gen(), rng.gen()))
+            .collect::<Vec<_>>();
+
+        let result = magic.channelize(&data);
+
+        for (r, e) in result.iter().zip(EXPECT_DATA_CHANNLIZER_ONCE.iter()) {
+            assert!(relative_eq!(r, e, epsilon = 1e-6));
+        }
+    }
 }
