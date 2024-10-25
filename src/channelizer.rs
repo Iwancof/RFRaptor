@@ -1,32 +1,16 @@
 use az::WrappingAs;
-use ice9_bindings::{_pfbch2_t, pfbch2_execute, pfbch2_init};
 
 use num_complex::Complex;
 
-// TODO: FFTを追加する
 pub struct Channelizer {
-    #[cfg(feature = "ice9")]
-    magic: ice9_bindings::_pfbch2_t,
-
-    #[cfg(not(feature = "ice9"))]
     num_channels: usize,
-
-    #[cfg(not(feature = "ice9"))]
     channel_half: usize,
-
-    #[cfg(not(feature = "ice9"))]
     filter_bank: FilterBank,
-
-    #[cfg(not(feature = "ice9"))]
     windows: Vec<SlidingWindow>,
-
-    #[cfg(not(feature = "ice9"))]
     flag: bool,
-
     fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
 }
 
-#[cfg(not(feature = "ice9"))]
 impl core::fmt::Debug for Channelizer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Channelizer")
@@ -39,13 +23,11 @@ impl core::fmt::Debug for Channelizer {
     }
 }
 
-// #[cfg(not(feature = "ice9"))]
 #[derive(Debug)]
 pub struct FilterBank {
-    subfilter_length: usize,
     subfilters: Vec<Vec<i16>>,
     // subfilters.len() == channels;
-    // subfilters[forall n].len() == subfilter_length;
+    // subfilters[forall n].len() is subfilter length
     //
     // subfilters[forall n] is reversed filter
 }
@@ -110,7 +92,6 @@ impl SlidingWindow {
     }
 }
 
-// #[cfg(not(feature = "ice9"))]
 impl FilterBank {
     fn from_filter(filter: &[f32], num_channels: usize, m: usize) -> Self {
         let subfilter_length = 2 * m;
@@ -140,42 +121,11 @@ impl FilterBank {
             subfilter.reverse();
         }
 
-        Self {
-            subfilter_length,
-            subfilters,
-        }
+        Self { subfilters }
     }
 }
 
 impl Channelizer {
-    #[cfg(feature = "ice9")]
-    pub fn new(channel: usize, m: usize, lp_cutoff: f32) -> Self {
-        let mut magic: core::mem::MaybeUninit<_pfbch2_t> = core::mem::MaybeUninit::uninit();
-        let mut filter = generate_filter(channel, m, lp_cutoff);
-
-        unsafe {
-            pfbch2_init(
-                magic.as_mut_ptr(),
-                channel as _,
-                m as _,
-                filter.as_mut_ptr(),
-            );
-        }
-
-        // SAFETY: filter will be copy into the struct
-        // so, we can drop it here
-
-        drop(filter);
-
-        let mut planner = rustfft::FftPlanner::new();
-
-        Self {
-            magic: unsafe { magic.assume_init() },
-            fft: planner.plan_fft_inverse(channel),
-        }
-    }
-
-    #[cfg(not(feature = "ice9"))]
     pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
         let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
         let windows = (0..num_channels)
@@ -196,37 +146,6 @@ impl Channelizer {
         }
     }
 
-    #[cfg(feature = "ice9")]
-    pub fn channelize(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
-        assert_eq!(input.len(), self.magic.M2 as usize);
-        let mut output = Vec::with_capacity(self.magic.M as usize);
-
-        // SAFETY: Complex<T> has `repr(C)` layout
-        let flat_chunk = input.as_ptr() as *mut i8;
-        let mut working = [0i16; 96 * 2];
-
-        unsafe {
-            pfbch2_execute(
-                &mut self.magic as _,
-                flat_chunk,
-                working.as_mut_ptr() as *mut i16,
-            );
-        }
-
-        // println!("{:?}", &working[..self.magic.M as usize * 2]);
-
-        working[..self.magic.M as usize * 2]
-            .array_chunks::<2>()
-            .for_each(|[re, im]| {
-                let re = *re as f32 / 32768.0;
-                let im = *im as f32 / 32768.0;
-                output.push(Complex::new(re, im));
-            });
-
-        output
-    }
-
-    #[cfg(not(feature = "ice9"))]
     pub fn channelize(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
         assert_eq!(input.len(), self.channel_half);
 
@@ -258,8 +177,6 @@ impl Channelizer {
             output.push(window.apply_filter(sf));
         }
 
-        // println!("{:?}", output);
-
         let output = output
             .iter()
             .map(|x| Complex::new(x.re as f32 / 32768.0, x.im as f32 / 32768.0))
@@ -275,15 +192,6 @@ impl Channelizer {
         self.fft.process(&mut working);
 
         working
-    }
-}
-
-#[cfg(feature = "ice9")]
-impl Drop for Channelizer {
-    fn drop(&mut self) {
-        unsafe {
-            ice9_bindings::pfbch2_release(&mut self.magic as _);
-        }
     }
 }
 
