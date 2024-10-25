@@ -1,6 +1,4 @@
 #![feature(iter_array_chunks)]
-#![allow(internal_features)]
-#![feature(core_intrinsics)]
 #![feature(array_chunks)]
 #![feature(let_chains)]
 
@@ -15,7 +13,6 @@ use fsk::FskDemod;
 use sdr::SDRConfig;
 
 use anyhow::Context;
-use core::mem::MaybeUninit;
 
 use num_complex::Complex;
 
