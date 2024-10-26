@@ -9,15 +9,19 @@ const MEDIAN_SYMBOLS: usize = 64usize;
 /// FSK demodulator
 #[derive(Debug)]
 pub struct FskDemod {
+    #[allow(unused)]
     freqdem: freqdem,
 
     /// number of samples per symbol
+    #[allow(unused)]
     pub sample_per_symbol: usize,
 
     /// number of symbols needed to calculate the median
+    #[allow(unused)]
     pub need_symbol: usize,
 
     /// limit of the frequency offset
+    #[allow(unused)]
     pub max_freq_offset: f32,
 }
 
@@ -25,15 +29,19 @@ pub struct FskDemod {
 #[derive(Debug)]
 pub struct Packet {
     /// demodulated bits
+    #[allow(unused)]
     pub bits: Vec<u8>,
 
     /// demodulated data
+    #[allow(unused)]
     pub demod: Vec<f32>,
 
     /// CFO (Carrier Frequency Offset)
+    #[allow(unused)]
     pub cfo: f32,
 
     /// frequency deviation
+    #[allow(unused)]
     pub deviation: f32,
 }
 
