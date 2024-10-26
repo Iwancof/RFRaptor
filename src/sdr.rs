@@ -2,10 +2,22 @@ use soapysdr::Direction::Rx;
 
 #[derive(Debug, Clone)]
 pub struct SDRConfig {
+    /// SDR antenna channel
     pub channels: usize,
+
+    /// Number of channels to view
+    pub num_channels: usize,
+
+    /// Center frequency of the SDR
     pub center_freq: f64,
+
+    /// Sample rate of the SDR
     pub sample_rate: f64,
+
+    /// Bandwidth of the SDR
     pub bandwidth: f64,
+
+    /// Gain of the SDR
     pub gain: f64,
 }
 
@@ -25,8 +37,8 @@ impl core::fmt::Display for SDRConfig {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
-            "channels: {}, center_freq: {}, sample_rate: {}, bandwidth: {}, gain: {}",
-            self.channels, self.center_freq, self.sample_rate, self.bandwidth, self.gain
+            "channels: {}, num_channels: {}, center_freq: {}, sample_rate: {}, bandwidth: {}, gain: {}",
+            self.channels, self.num_channels, self.center_freq, self.sample_rate, self.bandwidth, self.gain
         )
     }
 }
