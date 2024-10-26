@@ -5,12 +5,12 @@ use num_complex::Complex;
 
 #[derive(Debug)]
 struct CRCF {
-    crcf: liquid_dsp_bindings_sys::agc_crcf,
+    crcf: liquid_dsp_sys::agc_crcf,
 }
 
 impl CRCF {
     pub fn new() -> Self {
-        use liquid_dsp_bindings_sys::*;
+        use liquid_dsp_sys::*;
         let crcf = unsafe {
             let obj = agc_crcf_create();
             agc_crcf_set_bandwidth(obj, 0.25);
@@ -25,7 +25,7 @@ impl CRCF {
         Self { crcf }
     }
     pub fn execute(&mut self, signal: Complex<f32>) -> (Complex<f32>, SquelchStatus) {
-        use liquid_dsp_bindings_sys::*;
+        use liquid_dsp_sys::*;
 
         let mut value = __BindgenComplex {
             re: signal.re,
@@ -38,16 +38,14 @@ impl CRCF {
     }
 
     pub fn status(&self) -> SquelchStatus {
-        SquelchStatus::from_i32(unsafe {
-            liquid_dsp_bindings_sys::agc_crcf_squelch_get_status(self.crcf)
-        })
-        .unwrap()
+        SquelchStatus::from_i32(unsafe { liquid_dsp_sys::agc_crcf_squelch_get_status(self.crcf) })
+            .unwrap()
     }
 }
 
 impl Drop for CRCF {
     fn drop(&mut self) {
-        unsafe { liquid_dsp_bindings_sys::agc_crcf_destroy(self.crcf) };
+        unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf) };
     }
 }
 
@@ -60,14 +58,14 @@ pub struct Burst {
 
 #[derive(FromPrimitive, Clone, Copy, Debug)]
 pub enum SquelchStatus {
-    Unknown = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_UNKNOWN as _,
-    Enabled = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_ENABLED as _,
-    Rise = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_RISE as _,
-    SignalHi = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_SIGNALHI as _,
-    Fall = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_FALL as _,
-    SignalLo = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_SIGNALLO as _,
-    Timeout = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_TIMEOUT as _,
-    Disabled = liquid_dsp_bindings_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_DISABLED as _,
+    Unknown = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_UNKNOWN as _,
+    Enabled = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_ENABLED as _,
+    Rise = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_RISE as _,
+    SignalHi = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_SIGNALHI as _,
+    Fall = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_FALL as _,
+    SignalLo = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_SIGNALLO as _,
+    Timeout = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_TIMEOUT as _,
+    Disabled = liquid_dsp_sys::agc_squelch_mode_LIQUID_AGC_SQUELCH_DISABLED as _,
 }
 
 use chrono::prelude::*;

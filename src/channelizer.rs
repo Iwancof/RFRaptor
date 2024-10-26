@@ -2,13 +2,114 @@ use az::WrappingAs;
 
 use num_complex::Complex;
 
+/// Channelizer
 pub struct Channelizer {
-    num_channels: usize,
-    channel_half: usize,
+    /// number of channels
+    pub num_channels: usize,
+
+    /// filter bank
     filter_bank: FilterBank,
+
+    /// sliding windows that store the input data
     windows: Vec<SlidingWindow>,
-    flag: bool,
+
+    /// fft
     fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
+
+    #[doc(hidden)]
+    channel_half: usize, // num_channels / 2
+
+    #[doc(hidden)]
+    flag: bool,
+
+    #[doc(hidden)]
+    int_work_buffer: Vec<Complex<i32>>,
+
+    #[doc(hidden)]
+    float_work_buffer: Vec<Complex<f32>>,
+}
+
+impl Channelizer {
+    /// Create a new Channelizer by specifying the number of channels, the number of taps, and the
+    /// low-pass cutoff frequency.
+    /// This uses a Kaiser window to generate the filter taps internally.
+    pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
+        let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
+        let windows = (0..num_channels)
+            .map(|_| SlidingWindow::new(2 * m))
+            .collect::<Vec<_>>();
+
+        Self {
+            num_channels,
+            channel_half: num_channels / 2,
+            filter_bank: FilterBank::from_filter(
+                &generate_kaiser(num_channels, m, lp_cutoff),
+                num_channels,
+                m,
+            ),
+
+            windows,
+            flag: false,
+            fft,
+
+            int_work_buffer: Vec::with_capacity(num_channels),
+            float_work_buffer: Vec::with_capacity(num_channels),
+        }
+    }
+
+    /// Channelize the input data.
+    /// The input data must be exactly half the number of channels.
+    pub fn channelize(&mut self, input: &[Complex<i8>]) -> &mut Vec<Complex<f32>> {
+        debug_assert_eq!(input.len(), self.channel_half);
+
+        // Depending on the flag, we use a different window and subfilters.
+        let offset = if self.flag { self.channel_half } else { 0 };
+
+        // push input to the window
+        for (window, x) in self.windows[offset..]
+            .iter_mut()
+            .take(self.channel_half)
+            .rev()
+            .zip(input)
+        {
+            window.push(*x);
+        }
+
+        // if self.flag == true:
+        // [_, _, _, _, ..., push(input[last]), push(input[last-1]), ..., push(input[0])]
+        //                   ^ half of the channel
+        //
+        // if self.flag == false:
+        // [push(input[last]), push(input[last-1]), ..., push(input[0]), _, _, _, _, ...]
+        //                                                               ^ half of the channel
+
+        self.int_work_buffer.clear();
+
+        for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            let current_pos = (offset + ch_idx) % self.num_channels;
+            let sf = &self.filter_bank.subfilters[current_pos];
+
+            self.int_work_buffer.push(window.apply_filter(sf)); // apply kaiser window
+        }
+
+        self.float_work_buffer.clear();
+        for Complex { re, im } in self.int_work_buffer.iter() {
+            self.float_work_buffer
+                .push(Complex::new((*re as f32) / 32768.0, (*im as f32) / 32768.0));
+        }
+
+        self.flag = !self.flag;
+
+        &mut self.float_work_buffer
+    }
+
+    /// Channelize the input data and perform an FFT.
+    pub fn channelize_fft(&mut self, input: &[Complex<i8>]) -> &mut Vec<Complex<f32>> {
+        self.channelize(input);
+        self.fft.process(&mut self.float_work_buffer);
+
+        &mut self.float_work_buffer
+    }
 }
 
 impl core::fmt::Debug for Channelizer {
@@ -23,15 +124,52 @@ impl core::fmt::Debug for Channelizer {
     }
 }
 
+/// Filter bank
 #[derive(Debug)]
 pub struct FilterBank {
-    subfilters: Vec<Vec<i16>>,
+    subfilters: Vec<Vec<i32>>,
     // subfilters.len() == channels;
     // subfilters[forall n].len() is subfilter length
     //
     // subfilters[forall n] is reversed filter
 }
 
+impl FilterBank {
+    /// Create a new FilterBank from the given filter taps.
+    fn from_filter(filter: &[f32], num_channels: usize, m: usize) -> Self {
+        let subfilter_length = 2 * m;
+
+        assert_eq!(filter.len(), subfilter_length * num_channels + 1);
+
+        // STEP1: make `filter`'s type to i16
+        let filter = filter
+            .iter()
+            .map(|&x| {
+                let ret = ((x * 32768.0).round() as i32).wrapping_as::<i16>() as i32;
+
+                ret
+            })
+            .collect::<Vec<_>>();
+
+        // STEP2: split `filter` into subfilters
+        let mut subfilters = vec![vec![0; subfilter_length]; num_channels];
+        for (pos, filter_fragment) in filter.chunks_exact(num_channels).enumerate() {
+            for ch_idx in 0..num_channels {
+                subfilters[ch_idx][pos] = filter_fragment[ch_idx];
+            }
+        }
+
+        // STEP3: reverse subfilters
+        for subfilter in subfilters.iter_mut() {
+            subfilter.reverse();
+            // this makes convolution easier(dot product)
+        }
+
+        Self { subfilters }
+    }
+}
+
+/// Sliding window
 #[derive(Debug)]
 pub struct SlidingWindow {
     pub current_pos: usize,
@@ -39,8 +177,8 @@ pub struct SlidingWindow {
     pub offset: usize,
 
     // TODO: use Vec<Complex<i16>> instead of Vec<i16>
-    pub r: Vec<i16>,
-    pub i: Vec<i16>,
+    pub r: Vec<i32>,
+    pub i: Vec<i32>,
 }
 
 impl SlidingWindow {
@@ -69,138 +207,43 @@ impl SlidingWindow {
             self.i.copy_within(self.offset.., 0);
         }
 
-        let write_pos = self.current_pos + self.len - 1;
-        self.r[write_pos] = (re as i16) << 8i16;
-        self.i[write_pos] = (im as i16) << 8i16;
+        let write_pos = self.current_pos + self.len - 1; // TODO: remove overflow check
+        self.r[write_pos] = re as i32;
+        self.i[write_pos] = im as i32;
     }
 
-    pub(crate) fn apply_filter(&self, filter: &[i16]) -> Complex<i16> {
-        assert_eq!(filter.len(), self.len);
+    pub(crate) fn apply_filter(&self, filter: &[i32]) -> Complex<i32> {
+        debug_assert_eq!(filter.len(), self.len);
 
-        let mut re = 0i32;
-        let mut im = 0i32;
+        debug_assert_eq!(self.len, 8); // FIXME: remove this constraint
 
-        for (x, h) in self.r[self.current_pos..].iter().zip(filter) {
-            re += *x as i32 * *h as i32;
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8(r: *const i32, i: *const i32, h: *const i32, out: *mut i32);
+            // implemented in src/apply_filter.c
         }
 
-        for (x, h) in self.i[self.current_pos..].iter().zip(filter) {
-            im += *x as i32 * *h as i32;
+        let mut out = [0i32; 2];
+        unsafe {
+            // FIXME: replace with std::simd
+            dotprod_8(
+                self.r.as_ptr().add(self.current_pos),
+                self.i.as_ptr().add(self.current_pos),
+                filter.as_ptr(),
+                out.as_mut_ptr(),
+            );
         }
 
-        Complex::new((re >> 16) as i16, (im >> 16) as i16)
-    }
-}
-
-impl FilterBank {
-    fn from_filter(filter: &[f32], num_channels: usize, m: usize) -> Self {
-        let subfilter_length = 2 * m;
-
-        assert_eq!(filter.len(), subfilter_length * num_channels + 1); // TODO: check length
-
-        // STEP1: make `filter`'s type to i16
-        let filter = filter
-            .iter()
-            .map(|&x| {
-                let ret = ((x * 32768.0).round() as i32).wrapping_as::<i16>();
-
-                ret
-            })
-            .collect::<Vec<_>>();
-
-        // STEP2: split `filter` into subfilters
-        let mut subfilters = vec![vec![0; subfilter_length]; num_channels];
-        for (pos, filter_fragment) in filter.chunks_exact(num_channels).enumerate() {
-            for ch_idx in 0..num_channels {
-                subfilters[ch_idx][pos] = filter_fragment[ch_idx];
-            }
-        }
-
-        // STEP3: reverse subfilters
-        for subfilter in subfilters.iter_mut() {
-            subfilter.reverse();
-        }
-
-        Self { subfilters }
+        Complex::new(out[0] >> 8, out[1] >> 8) // due to sdr's signal format
     }
 }
 
-impl Channelizer {
-    pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
-        let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
-        let windows = (0..num_channels)
-            .map(|_| SlidingWindow::new(2 * m))
-            .collect::<Vec<_>>();
-
-        Self {
-            num_channels,
-            channel_half: num_channels / 2,
-            filter_bank: FilterBank::from_filter(
-                &generate_filter(num_channels, m, lp_cutoff),
-                num_channels,
-                m,
-            ),
-            windows,
-            flag: false,
-            fft,
-        }
-    }
-
-    pub fn channelize(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
-        assert_eq!(input.len(), self.channel_half);
-
-        let offset = if self.flag { self.channel_half } else { 0 };
-
-        for (window, x) in self.windows[offset..]
-            .iter_mut()
-            .take(self.channel_half)
-            .rev()
-            .zip(input)
-        {
-            window.push(*x);
-        }
-
-        // if self.flag == true:
-        // [_, _, _, _, ..., push(input[last]), push(input[last-1]), ..., push(input[0])]
-        //                   ^ half of the channel
-        //
-        // if self.flag == false:
-        // [push(input[last]), push(input[last-1]), ..., push(input[0]), _, _, _, _, ...]
-        //                                                               ^ half of the channel
-
-        let mut output = Vec::with_capacity(self.channel_half);
-
-        for (ch_idx, window) in self.windows.iter_mut().enumerate() {
-            let current_pos = (offset + ch_idx) % self.num_channels;
-            let sf = &self.filter_bank.subfilters[current_pos];
-
-            output.push(window.apply_filter(sf));
-        }
-
-        let output = output
-            .iter()
-            .map(|x| Complex::new(x.re as f32 / 32768.0, x.im as f32 / 32768.0))
-            .collect::<Vec<_>>();
-
-        self.flag = !self.flag;
-
-        output
-    }
-
-    pub fn channelize_fft(&mut self, input: &[Complex<i8>]) -> Vec<Complex<f32>> {
-        let mut working = self.channelize(input);
-        self.fft.process(&mut working);
-
-        working
-    }
-}
-
-fn generate_filter(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
+fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
     let h_len = 2 * channel * m + 1;
     let mut buffer = Vec::with_capacity(h_len);
 
     unsafe {
-        liquid_dsp_bindings_sys::liquid_firdes_kaiser(
+        liquid_dsp_sys::liquid_firdes_kaiser(
             h_len as _,
             lp_cutoff / channel as f32,
             60.0,
@@ -219,6 +262,8 @@ mod test {
     use super::*;
     use approx::relative_eq;
     use rand::{Rng, SeedableRng};
+
+    use std::simd::*;
 
     include!("./channelizer_define_test.rs");
 
@@ -289,7 +334,7 @@ mod test {
     fn convert_subfilter_kaiser_window() {
         let channel = 20;
         let m = 4;
-        let filter = generate_filter(channel, m, 0.75);
+        let filter = generate_kaiser(channel, m, 0.75);
 
         let filter_bank = FilterBank::from_filter(&filter, channel, m);
 
@@ -298,7 +343,7 @@ mod test {
             .zip(filter_bank.subfilters.iter())
         {
             for (e, c) in expect.iter().zip(calc.iter()) {
-                assert_eq!(*e, *c);
+                assert_eq!(*e as i32, *c);
             }
         }
     }
@@ -314,8 +359,133 @@ mod test {
             let r = expect.r.to_vec();
             let i = expect.i.to_vec();
 
-            assert_eq!(window.r, r);
-            assert_eq!(window.i, i);
+            assert_eq!(window.r.iter().map(|x| x << 8).collect::<Vec<_>>(), r);
+            assert_eq!(window.i.iter().map(|x| x << 8).collect::<Vec<_>>(), i);
         }
+    }
+
+    extern crate test;
+
+    #[bench]
+    fn use_naive_implementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut re = 0;
+            let mut im = 0;
+
+            for idx in 0..8 {
+                re += r[pos + idx] * filter[idx];
+                im += i[pos + idx] * filter[idx];
+            }
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_c_imeplementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8(r: *const i32, i: *const i32, h: *const i32, out: *mut i32);
+        }
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut out = [0i32; 2];
+            unsafe {
+                dotprod_8(
+                    r.as_ptr().add(pos),
+                    i.as_ptr().add(pos),
+                    filter.as_ptr(),
+                    out.as_mut_ptr(),
+                );
+            }
+
+            let [re, im] = out;
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_c_horiz_imeplementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8_horiz(r: *const i32, i: *const i32, h: *const i32, out: *mut i32);
+        }
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut out = [0i32; 2];
+            unsafe {
+                dotprod_8_horiz(
+                    r.as_ptr().add(pos),
+                    i.as_ptr().add(pos),
+                    filter.as_ptr(),
+                    out.as_mut_ptr(),
+                );
+            }
+
+            let [re, im] = out;
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_rust_simd_implementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let h = i32x8::load_or_default(filter.as_slice());
+            let r = i32x8::load_or_default(&r[pos..]);
+            let i = i32x8::load_or_default(&i[pos..]);
+
+            let r = r * h;
+            let i = i * h;
+
+            let [r0, r1, r2, r3, r4, r5, r6, r7] = r.to_array();
+            let [i0, i1, i2, i3, i4, i5, i6, i7] = i.to_array();
+
+            let re = r0 + r1 + r2 + r3 + r4 + r5 + r6 + r7;
+            let im = i0 + i1 + i2 + i3 + i4 + i5 + i6 + i7;
+
+            test::black_box(re);
+            test::black_box(im);
+        });
     }
 }

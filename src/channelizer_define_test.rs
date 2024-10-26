@@ -826,8 +826,8 @@ const EXPECT_DATA_CHANNELIZER: [[Complex<f32>; 20]; 10] = [
 ];
 
 pub struct __TestData {
-    pub r: [i16; 23],
-    pub i: [i16; 23],
+    pub r: [i32; 23],
+    pub i: [i32; 23],
     pub v: [i8; 2],
 }
 pub const EXPECT_DATA_WINDOW_PUSH: [__TestData; 100] = [
