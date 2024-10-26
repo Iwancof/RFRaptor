@@ -19,6 +19,8 @@ use num_complex::Complex;
 
 use tungstenite::accept;
 
+const NUM_CHANNELS: usize = 16usize;
+
 // Config at runtime
 static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
     const { std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::Mutex::new(None))) };
@@ -40,7 +42,6 @@ fn main() -> anyhow::Result<()> {
 
     let dev = soapysdr::Device::new(devarg)?;
 
-    const NUM_CHANNELS: usize = 16usize;
     let center_freq = 2427;
 
     let m = 4;
@@ -48,6 +49,7 @@ fn main() -> anyhow::Result<()> {
 
     let config = SDRConfig {
         channels: 0,
+        num_channels: NUM_CHANNELS,
         center_freq: center_freq as f64 * 1.0e6,
         sample_rate: 20.0e6,
         bandwidth: 20.0e6,
@@ -66,17 +68,6 @@ fn main() -> anyhow::Result<()> {
 
     // fixed size buffer
     let mut buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?].into_boxed_slice();
-
-    /*
-    // create mpsc channels
-    let mut txs = Vec::new();
-    let mut rxs = Vec::new();
-    for _ in 0..num_channels {
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<Complex<f32>>>();
-        txs.push(tx);
-        rxs.push(rx);
-    }
-    */
 
     // let mut is_buffer_valid = [false; 96];
     let mut sdridx_to_sender = vec![];
@@ -144,6 +135,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>)>>) {
+    let sample_rate = SDR_CONFIG.lock().unwrap().as_ref().unwrap().sample_rate as f32;
+    let num_channels = SDR_CONFIG.lock().unwrap().as_ref().unwrap().num_channels;
+
     for (ble_ch_idx, sdr_idx_rx) in rxs
         .into_iter()
         .enumerate()
@@ -154,7 +148,7 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
         let (_sdr_idx, rx) = sdr_idx_rx.unwrap();
         std::thread::spawn(move || {
             let mut burst = Burst::new();
-            let mut fsk = FskDemod::new();
+            let mut fsk = FskDemod::new(sample_rate, num_channels);
 
             loop {
                 for s in rx.recv().unwrap() {
@@ -163,7 +157,7 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
                             continue;
                         }
                         if let Some(out) = fsk.demod(&packet.data) {
-                            if let Ok(bt) = bluetooth::Bluetooth::from_packet(&out, freq) {
+                            if let Ok(bt) = bluetooth::Bluetooth::from_bits(&out.bits, freq as _) {
                                 if let bluetooth::BluetoothPacket::Advertisement(ref adv) =
                                     bt.packet
                                 {
