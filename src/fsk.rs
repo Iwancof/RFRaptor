@@ -181,10 +181,10 @@ impl FskDemod {
 }
 
 #[cfg(test)]
+#[cfg(feature = "ice9")]
 mod tests {
     use super::*;
 
-    use ice9_bindings::*;
     use rand::{Rng, SeedableRng};
 
     use std::ops::Range;

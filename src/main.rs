@@ -3,6 +3,7 @@
 #![feature(portable_simd)]
 #![feature(test)]
 
+mod bitops;
 mod bluetooth;
 mod burst;
 mod channelizer;
@@ -84,15 +85,16 @@ fn main() -> anyhow::Result<()> {
         .map(|_| std::sync::mpsc::channel::<Vec<Complex<f32>>>())
         .enumerate()
     {
+        let sdr_idx_isize = sdr_idx as isize;
         let freq = center_freq
-            + if sdr_idx < (NUM_CHANNELS / 2) {
-                sdr_idx
+            + if sdr_idx_isize < (NUM_CHANNELS as isize / 2) {
+                sdr_idx_isize
             } else {
-                sdr_idx - NUM_CHANNELS
+                sdr_idx_isize - NUM_CHANNELS as isize
             };
 
         if freq & 1 == 0 && freq >= 2402 && freq <= 2480 {
-            let blch = (freq - 2402) / 2;
+            let blch = ((freq - 2402) / 2) as usize;
 
             sdridx_to_sender[sdr_idx] = Some((blch, tx));
             blch_to_receiver[blch] = Some((sdr_idx, rx));
@@ -157,20 +159,32 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
                             continue;
                         }
                         if let Some(out) = fsk.demod(&packet.data) {
-                            if let Ok(bt) = bluetooth::Bluetooth::from_bits(&out.bits, freq as _) {
-                                if let bluetooth::BluetoothPacket::Advertisement(ref adv) =
-                                    bt.packet
-                                {
-                                    // println!("{}. remain: {:x?}", adv, bt.remain);
-
-                                    log::info!(
-                                        "{}. remain: {}",
-                                        adv,
-                                        byte_to_ascii_string(&bt.remain)
-                                    );
+                            if let Ok((remain_bits, byte_packet)) =
+                                bitops::bits_to_packet(&out.bits, freq as usize)
+                            {
+                                if remain_bits.len() != 0 {
+                                    log::trace!("remain bits: {:?}", remain_bits);
                                 }
 
-                                // PACKETS.lock().unwrap().push_back(bt);
+                                if let Ok(bt) =
+                                    bluetooth::Bluetooth::from_bytes(byte_packet, freq as usize)
+                                {
+                                    {
+                                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) =
+                                            bt.packet
+                                        {
+                                            // println!("{}. remain: {:x?}", adv, bt.remain);
+
+                                            log::info!(
+                                                "{}. remain: {}",
+                                                adv,
+                                                byte_to_ascii_string(&bt.remain)
+                                            );
+                                        }
+
+                                        // PACKETS.lock().unwrap().push_back(bt);
+                                    }
+                                }
                             }
                         }
                     }
@@ -214,7 +228,7 @@ fn start_websocket() -> anyhow::Result<()> {
                             let msg = Message {
                                 mac: format!("{}", adv.address),
                                 packetInfo: format!("{}", adv),
-                                packetBytes: format!("{:x?}", bt.bytes),
+                                packetBytes: format!("{:x?}", bt.bytes_packet),
                             };
 
                             ws.send(tungstenite::Message::Text(

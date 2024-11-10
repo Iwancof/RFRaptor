@@ -1,20 +1,21 @@
-use ice9_bindings::*;
+// use ice9_bindings::*;
 
 use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 
+use crate::bitops::BytePacket;
+
 // TODO: いい感じに実装する
 pub struct Bluetooth {
-    #[allow(unused)]
-    pub bits: Vec<u8>,
-
-    #[allow(unused)]
-    pub bytes: Vec<u8>,
+    pub bytes_packet: BytePacket,
 
     #[allow(unused)]
     pub packet: BluetoothPacket,
 
     #[allow(unused)]
     pub remain: Vec<u8>,
+
+    #[allow(unused)]
+    pub freq: usize,
 }
 
 pub enum DecodeError {
@@ -52,38 +53,25 @@ pub enum PDUType {
 }
 
 impl Bluetooth {
-    pub fn from_bits(bits: &Vec<u8>, freq: usize) -> Result<Self, DecodeError> {
-        let lap = unsafe { btbb_find_ac(bits.as_ptr() as _, bits.len() as _, 1) };
-
-        if lap != 0xffffffff {
-            return Err(DecodeError::FoundClassic(lap));
-        }
-
-        let p = unsafe { ble_easy(bits.as_ptr() as _, bits.len() as _, freq as _) };
-
-        if p.is_null() {
-            return Err(DecodeError::PacketNotFound);
-        }
-
-        let len = unsafe { (*p).len as usize };
-        let slice = unsafe { (*p).data.as_slice(len) };
-
-        let (remain, packet) = BluetoothPacket::from_bytes(&slice).unwrap();
+    pub fn from_bytes(byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
+        let (remain, packet) = BluetoothPacket::from_bytes(byte_packet.bytes.as_ref()).unwrap();
         // FIXME: unwrap will panic if slice is too short
 
         Ok(Self {
-            bits: bits.clone(),
-            bytes: slice.to_vec(),
+            bytes_packet: byte_packet.clone(),
             packet,
             remain: remain.to_vec(),
+            freq,
         })
     }
 
+    /*
     pub fn from_packet(packet: &_packet_t, freq: u32) -> Result<Self, DecodeError> {
         let slice = unsafe { std::slice::from_raw_parts(packet.bits, packet.bits_len as usize) };
 
         Self::from_bits(&slice.to_vec(), freq as usize)
     }
+    */
 }
 
 impl PDUType {
@@ -200,4 +188,45 @@ impl core::fmt::Display for BluetoothPacket {
             BluetoothPacket::Unimplemented(other) => write!(f, "Unimplemented({:x})", other),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // use libbtbb_sys::*;
+
+    /*
+    #[test]
+    fn test_find_lap_offset() {
+        let lap_bits: Vec<u8> = vec![
+            1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0,
+            0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0,
+            0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1,
+            1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0,
+            1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1,
+            0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1,
+            1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0,
+            0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1,
+            0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1,
+            0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0,
+            1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1,
+            1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1,
+        ];
+
+        let mut btbb_packet: *mut btbb_packet = std::ptr::null_mut();
+
+        unsafe {
+            let ret = btbb_find_ac(
+                lap_bits.as_ptr() as _,
+                lap_bits.len() as _,
+                LAP_ANY,
+                1,
+                (&mut btbb_packet) as *mut *mut btbb_packet,
+            );
+
+            assert!(ret < 0);
+        }
+    }
+    */
 }
