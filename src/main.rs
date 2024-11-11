@@ -2,6 +2,7 @@
 #![feature(let_chains)]
 #![feature(portable_simd)]
 #![feature(test)]
+#![feature(try_blocks)]
 
 mod bitops;
 mod bluetooth;
@@ -61,7 +62,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("config = {}", config);
     config.set(&dev)?;
 
-    let mut magic = channelizer::Channelizer::new(NUM_CHANNELS, m, lp_cutoff);
+    let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS, m, lp_cutoff);
 
     let mut stream = dev.rx_stream::<Complex<i8>>(&[config.channels])?;
 
@@ -113,7 +114,7 @@ fn main() -> anyhow::Result<()> {
             vec![Vec::with_capacity(131072 / (NUM_CHANNELS / 2)); NUM_CHANNELS];
 
         for chunk in buffer.chunks_exact_mut(NUM_CHANNELS / 2) {
-            for (sdridx, fft) in magic.channelize_fft(chunk).iter().enumerate() {
+            for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
                 if sdridx_to_sender[sdridx].is_some() {
                     fft_result[sdridx].push(*fft / (NUM_CHANNELS) as f32);
                 }
@@ -152,39 +153,58 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
             let mut burst = Burst::new();
             let mut fsk = FskDemod::new(sample_rate, num_channels);
 
+            enum ErrorKind {
+                Catcher,
+                Demod,
+                Bitops,
+                Bluetooth,
+            }
+
             loop {
-                for s in rx.recv().unwrap() {
-                    if let Some(packet) = burst.catcher(s) {
+                let received = rx.recv();
+                if received.is_err() {
+                    break;
+                }
+
+                for s in received.unwrap() {
+                    let ret: Result<(), ErrorKind> = try {
+                        let packet = burst.catcher(s).ok_or(ErrorKind::Catcher)?;
+
                         if packet.data.len() < 132 {
                             continue;
                         }
-                        if let Some(out) = fsk.demod(&packet.data) {
-                            if let Ok((remain_bits, byte_packet)) =
-                                bitops::bits_to_packet(&out.bits, freq as usize)
-                            {
-                                if remain_bits.len() != 0 {
-                                    log::trace!("remain bits: {:?}", remain_bits);
-                                }
 
-                                if let Ok(bt) =
-                                    bluetooth::Bluetooth::from_bytes(byte_packet, freq as usize)
-                                {
-                                    {
-                                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) =
-                                            bt.packet
-                                        {
-                                            // println!("{}. remain: {:x?}", adv, bt.remain);
+                        let demodulated = fsk.demod(&packet.data).ok_or(ErrorKind::Demod)?;
 
-                                            log::info!(
-                                                "{}. remain: {}",
-                                                adv,
-                                                byte_to_ascii_string(&bt.remain)
-                                            );
-                                        }
+                        let (remain_bits, byte_packet) =
+                            bitops::bits_to_packet(&demodulated.bits, freq as usize)
+                                .map_err(|_| ErrorKind::Bitops)?;
 
-                                        // PACKETS.lock().unwrap().push_back(bt);
-                                    }
-                                }
+                        if remain_bits.len() != 0 {
+                            log::trace!("remain bits: {:?}", remain_bits);
+                        }
+
+                        let bt = bluetooth::Bluetooth::from_bytes(byte_packet, freq as usize)
+                            .map_err(|_| ErrorKind::Bluetooth)?;
+
+                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                            log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
+                        }
+                    };
+
+                    if let Err(kind) = ret {
+                        match kind {
+                            ErrorKind::Catcher => {
+                                //
+                            }
+                            ErrorKind::Demod => {
+                                //
+                            }
+                            ErrorKind::Bitops => {
+                                //
+                            }
+                            ErrorKind::Bluetooth => {
+                                log::error!("failed to bluetooth");
                             }
                         }
                     }

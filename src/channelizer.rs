@@ -261,6 +261,7 @@ fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
 mod test {
     use super::*;
     use approx::relative_eq;
+    use num_traits::WrappingAdd;
     use rand::{Rng, SeedableRng};
 
     use std::simd::*;
@@ -382,8 +383,10 @@ mod test {
             let mut im = 0;
 
             for idx in 0..8 {
-                re += r[pos + idx] * filter[idx];
-                im += i[pos + idx] * filter[idx];
+                // re += r[pos + idx] * filter[idx];
+                // im += i[pos + idx] * filter[idx];
+                re = re.wrapping_add(&r[pos + idx].wrapping_mul(filter[idx]));
+                im = im.wrapping_add(&i[pos + idx].wrapping_mul(filter[idx]));
             }
 
             test::black_box(re);
@@ -481,8 +484,24 @@ mod test {
             let [r0, r1, r2, r3, r4, r5, r6, r7] = r.to_array();
             let [i0, i1, i2, i3, i4, i5, i6, i7] = i.to_array();
 
-            let re = r0 + r1 + r2 + r3 + r4 + r5 + r6 + r7;
-            let im = i0 + i1 + i2 + i3 + i4 + i5 + i6 + i7;
+            use core::num::Wrapping;
+
+            let re = Wrapping(r0)
+                + Wrapping(r1)
+                + Wrapping(r2)
+                + Wrapping(r3)
+                + Wrapping(r4)
+                + Wrapping(r5)
+                + Wrapping(r6)
+                + Wrapping(r7);
+            let im = Wrapping(i0)
+                + Wrapping(i1)
+                + Wrapping(i2)
+                + Wrapping(i3)
+                + Wrapping(i4)
+                + Wrapping(i5)
+                + Wrapping(i6)
+                + Wrapping(i7);
 
             test::black_box(re);
             test::black_box(im);
