@@ -32,7 +32,7 @@ pub enum BluetoothPacket {
 }
 
 pub struct Advertisement {
-    pub pdu_type: PDUType,
+    pub pdu_header: PDUHeader,
     pub length: u8,
     pub address: MacAddress,
 }
@@ -52,6 +52,14 @@ pub enum PDUType {
     Unknown(u8),
 }
 
+pub struct PDUHeader {
+    pdu_type: PDUType,
+    rfu: bool,
+    ch_sel: bool,
+    tx_add: bool,
+    rx_add: bool,
+}
+
 impl Bluetooth {
     pub fn from_bytes(byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
         let (remain, packet) = BluetoothPacket::from_bytes(byte_packet.bytes.as_ref()).unwrap();
@@ -64,19 +72,11 @@ impl Bluetooth {
             freq,
         })
     }
-
-    /*
-    pub fn from_packet(packet: &_packet_t, freq: u32) -> Result<Self, DecodeError> {
-        let slice = unsafe { std::slice::from_raw_parts(packet.bits, packet.bits_len as usize) };
-
-        Self::from_bits(&slice.to_vec(), freq as usize)
-    }
-    */
 }
 
-impl PDUType {
-    pub fn from_byte(byte: u8) -> Option<Self> {
-        match byte & 0b1111 {
+impl PDUHeader {
+    pub fn from_byte(mut byte: u8) -> Option<Self> {
+        let pdu_type = match byte & 0b1111 {
             0b0000 => Some(PDUType::AdvInd),
             0b0001 => Some(PDUType::AdvDirectInd),
             0b0010 => Some(PDUType::AdvNonconnInd),
@@ -85,7 +85,27 @@ impl PDUType {
             0b0101 => Some(PDUType::ConnectReq),
             0b0110 => Some(PDUType::AdvScanInd),
             x => Some(PDUType::Unknown(x)),
-        }
+        };
+
+        byte >>= 4;
+        let rfu = byte & 0b1 == 1;
+
+        byte >>= 1;
+        let ch_sel = byte & 0b1 == 1;
+
+        byte >>= 1;
+        let tx_add = byte & 0b1 == 1;
+
+        byte >>= 1;
+        let rx_add = byte & 0b1 == 1;
+
+        Some(PDUHeader {
+            pdu_type: pdu_type?,
+            rfu,
+            ch_sel,
+            tx_add,
+            rx_add,
+        })
     }
 }
 
@@ -106,7 +126,7 @@ impl BluetoothPacket {
 impl Advertisement {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, pdu_type) = take(1u8)(input)?;
-        let pdu_type = PDUType::from_byte(pdu_type[0]).unwrap();
+        let pdu_type = PDUHeader::from_byte(pdu_type[0]).unwrap();
 
         let (input, length) = take(1u8)(input)?;
         let length = length[0];
@@ -116,7 +136,7 @@ impl Advertisement {
         Ok((
             input,
             Advertisement {
-                pdu_type,
+                pdu_header: pdu_type,
                 length,
                 address,
             },
@@ -154,9 +174,9 @@ impl core::fmt::Display for MacAddress {
     }
 }
 
-impl core::fmt::Display for PDUType {
+impl core::fmt::Display for PDUHeader {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        match self {
+        match self.pdu_type {
             PDUType::AdvInd => write!(f, "ADV_IND"),
             PDUType::AdvDirectInd => write!(f, "ADV_DIRECT_IND"),
             PDUType::AdvNonconnInd => write!(f, "ADV_NONCONN_IND"),
@@ -165,7 +185,44 @@ impl core::fmt::Display for PDUType {
             PDUType::ConnectReq => write!(f, "CONNECT_REQ"),
             PDUType::AdvScanInd => write!(f, "ADV_SCAN_IND"),
             PDUType::Unknown(x) => write!(f, "Unknown(0x{:x})", x),
+        }?;
+
+        write!(f, "[")?;
+
+        let mut is_first = true;
+
+        if self.rfu {
+            if !is_first {
+                write!(f, "|")?;
+            }
+            write!(f, "RFU")?;
+            is_first = false;
         }
+
+        if self.ch_sel {
+            if !is_first {
+                write!(f, "|")?;
+            }
+            write!(f, "CH_SEL")?;
+            is_first = false;
+        }
+
+        if self.tx_add {
+            if !is_first {
+                write!(f, "|")?;
+            }
+            write!(f, "TX_ADD")?;
+            is_first = false;
+        }
+
+        if self.rx_add {
+            if !is_first {
+                write!(f, "|")?;
+            }
+            write!(f, "RX_ADD")?;
+        }
+
+        write!(f, "]")
     }
 }
 
@@ -173,8 +230,8 @@ impl core::fmt::Display for Advertisement {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
-            "type={:<20} len={}\taddr={}",
-            format!("{}", self.pdu_type),
+            "header={:<30} len={}\taddr={}",
+            format!("{}", self.pdu_header),
             self.length,
             self.address
         )
@@ -192,11 +249,11 @@ impl core::fmt::Display for BluetoothPacket {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // use libbtbb_sys::*;
 
     /*
+    use super::*;
+
     #[test]
     fn test_find_lap_offset() {
         let lap_bits: Vec<u8> = vec![

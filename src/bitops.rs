@@ -6,10 +6,15 @@ use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone)]
 pub struct BytePacket {
+    #[allow(unused)]
     pub bytes: Vec<u8>,
+    #[allow(unused)]
     pub aa: u32,
+    #[allow(unused)]
     pub freq: usize,
+    #[allow(unused)]
     pub delta: i64,
+    #[allow(unused)]
     pub offset: usize,
 }
 

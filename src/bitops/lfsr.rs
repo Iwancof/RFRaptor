@@ -44,12 +44,6 @@ impl LFSR0221 {
 
         bit
     }
-
-    pub fn skip(&mut self, n: usize) {
-        for _ in 0..n {
-            self.next_white();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -62,7 +56,7 @@ mod test {
 
         let mut white = vec![];
 
-        for i in 0..take {
+        for _ in 0..take {
             white.push(lfsr.next_white());
         }
 

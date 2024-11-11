@@ -1,5 +1,4 @@
 #![feature(array_chunks)]
-#![feature(let_chains)]
 #![feature(portable_simd)]
 #![feature(test)]
 #![feature(try_blocks)]
@@ -161,12 +160,11 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
             }
 
             loop {
-                let received = rx.recv();
-                if received.is_err() {
+                let Ok(received) = rx.recv() else {
                     break;
-                }
+                };
 
-                for s in received.unwrap() {
+                for s in received {
                     let ret: Result<(), ErrorKind> = try {
                         let packet = burst.catcher(s).ok_or(ErrorKind::Catcher)?;
 
@@ -188,24 +186,31 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
                             .map_err(|_| ErrorKind::Bluetooth)?;
 
                         if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
-                            log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
+                            // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
+                            log::info!("{}", adv);
+
+                            let cfg = pretty_hex::HexConfig { title: false, width: 8, group: 0, ..Default::default() };
+                            let hex = pretty_hex::config_hex(&bt.remain, cfg);
+                            log::info!("\n{}", hex);
                         }
                     };
 
-                    if let Err(kind) = ret {
-                        match kind {
-                            ErrorKind::Catcher => {
-                                //
-                            }
-                            ErrorKind::Demod => {
-                                //
-                            }
-                            ErrorKind::Bitops => {
-                                //
-                            }
-                            ErrorKind::Bluetooth => {
-                                log::error!("failed to bluetooth");
-                            }
+                    let Err(kind) = ret else {
+                        continue;
+                    };
+
+                    match kind {
+                        ErrorKind::Catcher => {
+                            //
+                        }
+                        ErrorKind::Demod => {
+                            //
+                        }
+                        ErrorKind::Bitops => {
+                            //
+                        }
+                        ErrorKind::Bluetooth => {
+                            log::error!("failed to bluetooth");
                         }
                     }
                 }
