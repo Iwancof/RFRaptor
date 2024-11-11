@@ -1,11 +1,8 @@
-// mod lap;
-// mod preamble; mod aa;
-// mod whitening;
 mod lfsr;
+mod bitparser;
 
-use anyhow::Result;
-
-use nom::{bytes::complete::take, error::ErrorKind};
+use bitparser::*;
+use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone)]
 pub struct BytePacket {
@@ -17,7 +14,6 @@ pub struct BytePacket {
 }
 
 pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], BytePacket)> {
-    use anyhow::anyhow;
     use zerocopy::FromBytes;
 
     let bits_len = bits.len() as i64;
@@ -80,108 +76,6 @@ pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], Byte
             freq,
         },
     ))
-}
-
-pub struct Lap {
-    lap: Option<u32>,
-}
-
-impl Lap {
-    fn parse<'a>(input: &[u8]) -> nom::IResult<&[u8], Self> {
-        use core::mem::MaybeUninit;
-        use libbtbb_sys::btbb_packet;
-
-        let mut btbb_packet = MaybeUninit::<btbb_packet>::zeroed();
-        let ret = unsafe {
-            libbtbb_sys::btbb_find_ac(
-                input.as_ptr() as _,
-                input.len() as _,
-                libbtbb_sys::LAP_ANY,
-                1,
-                (&mut btbb_packet.as_mut_ptr()) as _,
-            )
-        };
-
-        if ret < 0 {
-            return Ok((input, Self { lap: None }));
-        }
-
-        // btbb_packet is valid
-        let btbb_packet = unsafe { btbb_packet.assume_init() };
-
-        return Ok((
-            input,
-            Self {
-                lap: Some(btbb_packet.LAP),
-            },
-        ));
-    }
-
-    fn is_valid_as_ble(&self) -> bool {
-        if let Some(lap) = self.lap {
-            return lap == 0xffffffff;
-        }
-
-        return true;
-    }
-}
-
-pub struct Preamble {}
-
-impl Preamble {
-    fn parse(input: &[u8]) -> nom::IResult<&[u8], Self> {
-        let (remain, took) = take(6u8)(input)?;
-
-        let mut fail = false;
-
-        fail |= took[0] != took[2]; // fail
-        fail |= took[1] != took[3]; // fail
-        fail |= took[2] != took[4]; // fail
-        fail |= took[3] != took[5]; // fail
-
-        if fail {
-            return Err(nom::Err::Error(nom::error::Error::new(
-                input,
-                ErrorKind::Fail,
-            )));
-        }
-
-        Ok((remain, Self {}))
-    }
-}
-
-pub struct RawByte {
-    byte: u8,
-}
-
-impl RawByte {
-    fn parse<'a>(input: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
-        let (remain, raw_bits) = take(8u8)(input)?;
-
-        let mut byte = 0;
-        for (i, b) in raw_bits.iter().enumerate() {
-            byte |= b << i;
-        }
-
-        Ok((remain, Self { byte }))
-    }
-}
-
-pub struct WhitedByte {
-    byte: u8,
-}
-
-impl WhitedByte {
-    fn parse<'a>(input: &'a [u8], lsfr: &mut lfsr::LFSR0221) -> nom::IResult<&'a [u8], Self> {
-        let (remain, raw_bits) = take(8u8)(input)?;
-
-        let mut byte = 0;
-        for (i, b) in raw_bits.iter().enumerate() {
-            byte |= (b ^ lsfr.next_white()) << i;
-        }
-
-        Ok((remain, Self { byte }))
-    }
 }
 
 #[cfg(test)]
