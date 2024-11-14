@@ -152,6 +152,7 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
             let mut burst = Burst::new();
             let mut fsk = FskDemod::new(sample_rate, num_channels);
 
+            #[derive(Debug)]
             enum ErrorKind {
                 Catcher,
                 Demod,
@@ -185,7 +186,7 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
                         let bt = bluetooth::Bluetooth::from_bytes(byte_packet, freq as usize)
                             .map_err(|_| ErrorKind::Bluetooth)?;
 
-                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                        if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
                             log::info!("{}", adv);
 
@@ -249,7 +250,7 @@ fn start_websocket() -> anyhow::Result<()> {
                             packetBytes: String,
                         }
 
-                        if let bluetooth::BluetoothPacket::Advertisement(ref adv) = bt.packet {
+                        if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             let msg = Message {
                                 mac: format!("{}", adv.address),
                                 packetInfo: format!("{}", adv),

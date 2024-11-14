@@ -18,7 +18,6 @@ biquad = "0.4.2"
 chrono = "0.4.38"
 debug-helper = { version = "0.1.0", path = "../../../Rust/debug-helper" }
 env_logger = "0.11.5"
-# ice9-bindings = { version = "0.1.0", path = "ice9-bindings" }
 libbtbb-sys = { version = "0.1.0", path = "../../../Rust/libbtbb-sys" }
 liquid-dsp-sys = { version = "0.1.0", path = "../../../Rust/liquid-dsp-sys" }
 log = "0.4.22"
@@ -27,6 +26,7 @@ nom = "7.1.3"
 num-complex = "0.4.6"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
+pretty-hex = "0.4.1"
 # libhackrf-sys = { version = "0.1.0", path = "../../../../WorkSpace/Rust/libhackrf-sys" }
 rustfft = "6.2.0"
 serde = "1.0.210"
@@ -44,7 +44,6 @@ approx = { version = "0.5.1", features = ["num-complex"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
 
 [features]
-ice9 = []
 
 [build-dependencies]
 cc = "1.1.31"

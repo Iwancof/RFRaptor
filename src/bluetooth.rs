@@ -26,7 +26,12 @@ pub enum DecodeError {
     PacketNotFound,
 }
 
-pub enum BluetoothPacket {
+pub struct BluetoothPacket {
+    pub inner: PacketInner,
+    pub crc: [u8; 3],
+}
+
+pub enum PacketInner {
     Advertisement(Advertisement),
     Unimplemented(u32),
 }
@@ -61,13 +66,26 @@ pub struct PDUHeader {
 }
 
 impl Bluetooth {
-    pub fn from_bytes(byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
-        let (remain, packet) = BluetoothPacket::from_bytes(byte_packet.bytes.as_ref()).unwrap();
+    pub fn from_bytes(mut byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
+        let len = byte_packet.bytes.len();
+        let mut crc = [0, 0, 0];
+        /*
+        for (i, b) in byte_packet.bytes.drain(len - 3..).enumerate() {
+            crc[i] = b;
+        }
+        */
+
+        println!("crc: {:02x}{:02x}{:02x}", crc[0], crc[1], crc[2]);
+
+        let (remain, packet_inner) = PacketInner::from_bytes(byte_packet.bytes.as_ref()).unwrap();
         // FIXME: unwrap will panic if slice is too short
 
         Ok(Self {
             bytes_packet: byte_packet.clone(),
-            packet,
+            packet: BluetoothPacket {
+                inner: packet_inner,
+                crc,
+            },
             remain: remain.to_vec(),
             freq,
         })
@@ -109,16 +127,16 @@ impl PDUHeader {
     }
 }
 
-impl BluetoothPacket {
+impl PacketInner {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, access_address) = le_u32(input)?;
 
         match access_address {
             0x8E89BED6 => {
                 let (input, adv) = Advertisement::from_bytes(input)?;
-                Ok((input, BluetoothPacket::Advertisement(adv)))
+                Ok((input, PacketInner::Advertisement(adv)))
             }
-            other => Ok((input, BluetoothPacket::Unimplemented(other))),
+            other => Ok((input, PacketInner::Unimplemented(other))),
         }
     }
 }
@@ -238,11 +256,11 @@ impl core::fmt::Display for Advertisement {
     }
 }
 
-impl core::fmt::Display for BluetoothPacket {
+impl core::fmt::Display for PacketInner {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            BluetoothPacket::Advertisement(adv) => write!(f, "{}", adv),
-            BluetoothPacket::Unimplemented(other) => write!(f, "Unimplemented({:x})", other),
+            PacketInner::Advertisement(adv) => write!(f, "{}", adv),
+            PacketInner::Unimplemented(other) => write!(f, "Unimplemented({:x})", other),
         }
     }
 }
