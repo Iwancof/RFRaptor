@@ -1,7 +1,7 @@
 mod bitparser;
 mod lfsr;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use bitparser::*;
 
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub struct BytePacket {
     pub offset: usize,
 }
 
-pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], BytePacket)> {
+pub fn bits_to_packet(bits: &[u8], freq: usize) -> Result<(&[u8], BytePacket)> {
     use zerocopy::FromBytes;
 
     let bits_len = bits.len() as i64;

@@ -19,7 +19,7 @@ impl LFSR0221 {
             if phys_channel < 12 {
                 return (phys_channel - 1) as _;
             }
-            return (phys_channel - 2) as _;
+            (phys_channel - 2) as _
         }
 
         let channel = freq_to_channel(freq);

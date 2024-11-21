@@ -22,6 +22,8 @@ use tungstenite::accept;
 
 const NUM_CHANNELS: usize = 20usize;
 
+type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
+
 // Config at runtime
 static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
     const { std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::Mutex::new(None))) };
@@ -44,8 +46,8 @@ fn main() -> anyhow::Result<()> {
     let dev = soapysdr::Device::new(devarg)?;
 
     // let center_freq = 2480;
-    let center_freq = 2401;
-    // let center_freq = 2425;
+    // let center_freq = 2401;
+    let center_freq = 2427;
 
     let m = 4;
     let lp_cutoff = 0.75;
@@ -95,7 +97,7 @@ fn main() -> anyhow::Result<()> {
                 sdr_idx_isize - NUM_CHANNELS as isize
             };
 
-        if freq & 1 == 0 && freq >= 2402 && freq <= 2480 {
+        if freq & 1 == 0 && (2402..=2480).contains(&freq) {
             let blch = ((freq - 2402) / 2) as usize;
 
             sdridx_to_sender[sdr_idx] = Some((blch, tx));
@@ -106,8 +108,9 @@ fn main() -> anyhow::Result<()> {
     create_catcher_threads(blch_to_receiver);
     start_websocket()?;
 
-    let mut fft_result: Vec<Vec<Complex<f32>>> =
-        vec![Vec::with_capacity(131072 / (NUM_CHANNELS / 2)); NUM_CHANNELS];
+    let mut fft_result: Vec<Vec<Complex<f32>>> = (0..NUM_CHANNELS)
+        .map(|_| Vec::with_capacity(131072 / (NUM_CHANNELS / 2)))
+        .collect::<Vec<_>>();
 
     stream.activate(None)?;
     '_outer: for _ in 0.. {
@@ -143,7 +146,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>)>>) {
+fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
     let sample_rate = SDR_CONFIG.lock().unwrap().as_ref().unwrap().sample_rate as f32;
     let num_channels = SDR_CONFIG.lock().unwrap().as_ref().unwrap().num_channels;
 
@@ -174,19 +177,21 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
 
                 for s in received {
                     let ret: Result<(), ErrorKind> = try {
-                        let packet = burst.catcher(s / num_channels as f32).ok_or(ErrorKind::Catcher)?;
+                        let packet = burst
+                            .catcher(s / num_channels as f32)
+                            .ok_or(ErrorKind::Catcher)?;
 
                         if packet.data.len() < 132 {
                             continue;
                         }
 
-                        let demodulated = fsk.demod(&packet.data).ok_or(ErrorKind::Demod)?;
+                        let demodulated = fsk.demod(packet.data).ok_or(ErrorKind::Demod)?;
 
                         let (remain_bits, byte_packet) =
                             bitops::bits_to_packet(&demodulated.bits, freq as usize)
                                 .map_err(|_| ErrorKind::Bitops)?;
 
-                        if remain_bits.len() != 0 {
+                        if !remain_bits.is_empty() {
                             log::trace!("remain bits: {:?}", remain_bits);
                         }
 
@@ -279,18 +284,4 @@ fn start_websocket() -> anyhow::Result<()> {
     });
 
     Ok(())
-}
-
-fn byte_to_ascii_string(bytes: &[u8]) -> String {
-    let mut ret = String::new();
-
-    for b in bytes {
-        if b.is_ascii_alphanumeric() {
-            ret.push(*b as char);
-        } else {
-            ret.push_str(&format!("\\x{:02x}", b));
-        }
-    }
-
-    ret
 }

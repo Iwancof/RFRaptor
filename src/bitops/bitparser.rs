@@ -7,7 +7,7 @@ pub struct Lap {
 }
 
 impl Lap {
-    pub fn parse<'a>(input: &[u8]) -> nom::IResult<&[u8], Self> {
+    pub fn parse(input: &[u8]) -> nom::IResult<&[u8], Self> {
         use core::mem::MaybeUninit;
         use libbtbb_sys::btbb_packet;
 
@@ -29,7 +29,7 @@ impl Lap {
         // btbb_packet is valid
         let btbb_packet = unsafe { btbb_packet.assume_init() };
 
-        return Ok((
+        Ok((
             input,
             Self {
                 /*
@@ -41,7 +41,7 @@ impl Lap {
                     }
                 )
             },
-        ));
+        ))
     }
 
     pub fn is_valid_as_ble(&self) -> bool {
@@ -49,7 +49,7 @@ impl Lap {
             return lap == 0xffffffff;
         }
 
-        return true;
+        true
     }
 }
 
@@ -84,7 +84,7 @@ pub struct RawByte {
 }
 
 impl RawByte {
-    pub fn parse<'a>(input: &'a [u8]) -> nom::IResult<&'a [u8], Self> {
+    pub fn parse(input: &[u8]) -> nom::IResult<&[u8], Self> {
         let (remain, raw_bits) = take(8u8)(input)?;
 
         let mut byte = 0;

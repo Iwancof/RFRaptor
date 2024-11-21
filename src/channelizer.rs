@@ -143,11 +143,7 @@ impl FilterBank {
         // STEP1: make `filter`'s type to i16
         let filter = filter
             .iter()
-            .map(|&x| {
-                let ret = ((x * 32768.0).round() as i32).wrapping_as::<i16>() as i32;
-
-                ret
-            })
+            .map(|&x| ((x * 32768.0).round() as i32).wrapping_as::<i16>() as i32)
             .collect::<Vec<_>>();
 
         // STEP2: split `filter` into subfilters

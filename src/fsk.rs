@@ -87,7 +87,7 @@ impl FskDemod {
 
             freqdem_demodulate_block(
                 self.freqdem,
-                data.as_ptr() as *const Complex<f32> as *mut __BindgenComplex<f32>,
+                data.as_ptr() as *mut __BindgenComplex<f32>,
                 data.len() as _,
                 demod.as_mut_ptr(),
             );

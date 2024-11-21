@@ -4,11 +4,11 @@ use num_traits::FromPrimitive;
 use num_complex::Complex;
 
 #[derive(Debug)]
-struct CRCF {
+struct Crcf {
     crcf: liquid_dsp_sys::agc_crcf,
 }
 
-impl CRCF {
+impl Crcf {
     pub fn new() -> Self {
         use liquid_dsp_sys::*;
         let crcf = unsafe {
@@ -43,7 +43,7 @@ impl CRCF {
     }
 }
 
-impl Drop for CRCF {
+impl Drop for Crcf {
     fn drop(&mut self) {
         unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf) };
     }
@@ -51,7 +51,7 @@ impl Drop for CRCF {
 
 #[derive(Debug)]
 pub struct Burst {
-    crcf: CRCF,
+    crcf: Crcf,
     in_burst: bool,
     burst: Vec<Complex<f32>>,
 }
@@ -81,7 +81,7 @@ pub struct Packet<'a> {
 impl Burst {
     pub fn new() -> Self {
         Self {
-            crcf: CRCF::new(),
+            crcf: Crcf::new(),
             in_burst: false,
             burst: Vec::new(),
         }

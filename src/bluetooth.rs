@@ -279,16 +279,16 @@ impl core::fmt::Display for PDUHeader {
 
 impl core::fmt::Display for Advertisement {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(
+        writeln!(
             f,
-            "header={:<30} len={}\taddr={}\n",
+            "header={:<30} len={}\taddr={}",
             format!("{}", self.pdu_header),
             self.length,
             self.address,
         )?;
 
         for adv_data in &self.data {
-            write!(f, "{}\n", adv_data)?;
+            writeln!(f, "{}", adv_data)?;
         }
 
         Ok(())
