@@ -5,6 +5,7 @@ use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 use crate::bitops::BytePacket;
 
 // TODO: いい感じに実装する
+#[derive(Clone)]
 pub struct Bluetooth {
     pub bytes_packet: BytePacket,
 
@@ -26,26 +27,34 @@ pub enum DecodeError {
     PacketNotFound,
 }
 
+#[derive(Clone)]
 pub struct BluetoothPacket {
     pub inner: PacketInner,
+
+    #[allow(unused)]
     pub crc: [u8; 3],
 }
 
+#[derive(Clone)]
 pub enum PacketInner {
     Advertisement(Advertisement),
     Unimplemented(u32),
 }
 
+#[derive(Clone)]
 pub struct Advertisement {
     pub pdu_header: PDUHeader,
     pub length: u8,
     pub address: MacAddress,
+    pub data: Vec<AdvData>,
 }
 
+#[derive(Clone)]
 pub struct MacAddress {
     pub address: [u8; 6],
 }
 
+#[derive(Clone)]
 pub enum PDUType {
     AdvInd,
     AdvDirectInd,
@@ -57,6 +66,7 @@ pub enum PDUType {
     Unknown(u8),
 }
 
+#[derive(Clone)]
 pub struct PDUHeader {
     pdu_type: PDUType,
     rfu: bool,
@@ -65,18 +75,21 @@ pub struct PDUHeader {
     rx_add: bool,
 }
 
+#[derive(Clone)]
+pub struct AdvData {
+    len: u8,
+    data: Vec<u8>,
+}
+
 impl Bluetooth {
     pub fn from_bytes(mut byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
         let len = byte_packet.bytes.len();
         let mut crc = [0, 0, 0];
-        /*
         for (i, b) in byte_packet.bytes.drain(len - 3..).enumerate() {
             crc[i] = b;
         }
-        */
 
-        println!("crc: {:02x}{:02x}{:02x}", crc[0], crc[1], crc[2]);
-
+        // println!("crc: {:02x}{:02x}{:02x}", crc[0], crc[1], crc[2]);
         let (remain, packet_inner) = PacketInner::from_bytes(byte_packet.bytes.as_ref()).unwrap();
         // FIXME: unwrap will panic if slice is too short
 
@@ -151,12 +164,21 @@ impl Advertisement {
 
         let (input, address) = MacAddress::from_bytes(input)?;
 
+        let mut data = Vec::new();
+        let mut input = input;
+
+        while let Ok((remain, adv_data)) = AdvData::from_bytes(input) {
+            data.push(adv_data);
+            input = remain;
+        }
+
         Ok((
             input,
             Advertisement {
                 pdu_header: pdu_type,
                 length,
                 address,
+                data,
             },
         ))
     }
@@ -174,6 +196,17 @@ impl MacAddress {
                 ],
             },
         ))
+    }
+}
+
+impl AdvData {
+    fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
+        let (input, len) = take(1u8)(input)?;
+        let len = len[0];
+
+        let (input, data) = take(len)(input)?;
+
+        Ok((input, AdvData { len, data: data.to_vec() }))
     }
 }
 
@@ -248,11 +281,17 @@ impl core::fmt::Display for Advertisement {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
-            "header={:<30} len={}\taddr={}",
+            "header={:<30} len={}\taddr={}\n",
             format!("{}", self.pdu_header),
             self.length,
-            self.address
-        )
+            self.address,
+        )?;
+
+        for adv_data in &self.data {
+            write!(f, "{}\n", adv_data)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -262,6 +301,12 @@ impl core::fmt::Display for PacketInner {
             PacketInner::Advertisement(adv) => write!(f, "{}", adv),
             PacketInner::Unimplemented(other) => write!(f, "Unimplemented({:x})", other),
         }
+    }
+}
+
+impl core::fmt::Display for AdvData {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "len={} data={:02x?}", self.len, self.data)
     }
 }
 

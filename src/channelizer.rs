@@ -84,7 +84,6 @@ impl Channelizer {
         //                                                               ^ half of the channel
 
         self.int_work_buffer.clear();
-
         for (ch_idx, window) in self.windows.iter_mut().enumerate() {
             let current_pos = (offset + ch_idx) % self.num_channels;
             let sf = &self.filter_bank.subfilters[current_pos];

@@ -1,8 +1,8 @@
-mod lfsr;
 mod bitparser;
+mod lfsr;
 
+use anyhow::{anyhow, bail, Result};
 use bitparser::*;
-use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone)]
 pub struct BytePacket {
@@ -23,12 +23,17 @@ pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], Byte
 
     let bits_len = bits.len() as i64;
 
-    let (bits, lap) = Lap::parse(bits).map_err(|_| anyhow!("failed to parse lap"))?;
+    let Ok((bits, lap)) = Lap::parse(bits) else {
+        bail!("failed to parse lap")
+    };
+
     if !lap.is_valid_as_ble() {
-        return Err(anyhow!("lap is not valid"));
+        bail!("lap is not valid");
     }
 
-    let (bits, _) = Preamble::parse(bits).map_err(|_| anyhow!("failed to parse preamble"))?;
+    let Ok((bits, _)) = Preamble::parse(bits) else {
+        bail!("failed to parse preamble");
+    };
 
     let mut found_data = useful_number::updatable_num::UpdateToMinI64WithData::new();
     for offset in 0..3 {
@@ -38,7 +43,9 @@ pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], Byte
         let mut bytes = Vec::new();
 
         for _ in 0..4 {
-            let (remain, byte) = RawByte::parse(bits).map_err(|_| anyhow!("bit starvation"))?;
+            let Ok((remain, byte)) = RawByte::parse(bits) else {
+                bail!("bit starvation");
+            };
 
             bits = remain;
             bytes.push(byte.byte);
@@ -59,16 +66,19 @@ pub fn bits_to_packet<'a>(bits: &'a [u8], freq: usize) -> Result<(&'a [u8], Byte
         found_data.update(delta, (bytes, bits, offset));
     }
 
-    let (delta, (bytes, remain_bits, offset)) = found_data
-        .take()
-        .ok_or(anyhow!("valid length data not found"))?;
+    let Some((delta, (bytes, remain_bits, offset))) = found_data.take() else {
+        bail!("valid length data not found");
+    };
 
     if 20 <= delta {
-        anyhow::bail!("delta is too bit {}", delta);
+        bail!("delta is too bit {}", delta);
     }
 
-    let aa =
-        *u32::ref_from_bytes(&bytes[0..4]).map_err(|_| anyhow!("bytes is too small to get AA"))?;
+    let Ok(aa) = u32::ref_from_bytes(&bytes[0..4]) else {
+        bail!("bytes is too small to get AA");
+    };
+
+    let aa = *aa;
 
     Ok((
         remain_bits,

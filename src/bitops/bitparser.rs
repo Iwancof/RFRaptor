@@ -32,7 +32,14 @@ impl Lap {
         return Ok((
             input,
             Self {
+                /*
                 lap: Some(btbb_packet.LAP),
+                */
+                lap: Some(
+                    unsafe {
+                        libbtbb_sys::btbb_packet_get_lap(&btbb_packet)
+                    }
+                )
             },
         ));
     }

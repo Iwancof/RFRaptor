@@ -1,0 +1,5 @@
+/target/
+/perf.*
+/packet-viewer
+/flamegraph.html
+/.gdb_history

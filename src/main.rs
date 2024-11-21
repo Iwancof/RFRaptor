@@ -20,7 +20,7 @@ use num_complex::Complex;
 
 use tungstenite::accept;
 
-const NUM_CHANNELS: usize = 16usize;
+const NUM_CHANNELS: usize = 20usize;
 
 // Config at runtime
 static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
@@ -43,7 +43,9 @@ fn main() -> anyhow::Result<()> {
 
     let dev = soapysdr::Device::new(devarg)?;
 
-    let center_freq = 2427;
+    // let center_freq = 2480;
+    let center_freq = 2401;
+    // let center_freq = 2425;
 
     let m = 4;
     let lp_cutoff = 0.75;
@@ -102,20 +104,25 @@ fn main() -> anyhow::Result<()> {
     }
 
     create_catcher_threads(blch_to_receiver);
-    // start_websocket()?;
+    start_websocket()?;
+
+    let mut fft_result: Vec<Vec<Complex<f32>>> =
+        vec![Vec::with_capacity(131072 / (NUM_CHANNELS / 2)); NUM_CHANNELS];
 
     stream.activate(None)?;
     '_outer: for _ in 0.. {
-        let read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
-        assert_eq!(read, buffer.len());
+        let _read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+        // assert_eq!(read, buffer.len());
 
-        let mut fft_result: Vec<Vec<Complex<f32>>> =
-            vec![Vec::with_capacity(131072 / (NUM_CHANNELS / 2)); NUM_CHANNELS];
+        for fft in fft_result.iter_mut() {
+            fft.clear();
+        }
 
         for chunk in buffer.chunks_exact_mut(NUM_CHANNELS / 2) {
             for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
                 if sdridx_to_sender[sdridx].is_some() {
-                    fft_result[sdridx].push(*fft / (NUM_CHANNELS) as f32);
+                    // fft_result[sdridx].push(*fft / (NUM_CHANNELS) as f32);
+                    fft_result[sdridx].push(*fft);
                 }
             }
         }
@@ -167,7 +174,7 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
 
                 for s in received {
                     let ret: Result<(), ErrorKind> = try {
-                        let packet = burst.catcher(s).ok_or(ErrorKind::Catcher)?;
+                        let packet = burst.catcher(s / num_channels as f32).ok_or(ErrorKind::Catcher)?;
 
                         if packet.data.len() < 132 {
                             continue;
@@ -186,13 +193,14 @@ fn create_catcher_threads(rxs: Vec<Option<(usize, std::sync::mpsc::Receiver<Vec<
                         let bt = bluetooth::Bluetooth::from_bytes(byte_packet, freq as usize)
                             .map_err(|_| ErrorKind::Bluetooth)?;
 
+                        PACKETS.lock().unwrap().push_back(bt.clone());
                         if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
                             log::info!("{}", adv);
 
-                            let cfg = pretty_hex::HexConfig { title: false, width: 8, group: 0, ..Default::default() };
-                            let hex = pretty_hex::config_hex(&bt.remain, cfg);
-                            log::info!("\n{}", hex);
+                            // let cfg = pretty_hex::HexConfig { title: false, width: 8, group: 0, ..Default::default() };
+                            // let hex = pretty_hex::config_hex(&bt.remain, cfg);
+                            // log::info!("\n{}", hex);
                         }
                     };
 
@@ -256,6 +264,8 @@ fn start_websocket() -> anyhow::Result<()> {
                                 packetInfo: format!("{}", adv),
                                 packetBytes: format!("{:x?}", bt.bytes_packet),
                             };
+
+                            println!("sent");
 
                             ws.send(tungstenite::Message::Text(
                                 serde_json::to_string(&msg).unwrap(),
