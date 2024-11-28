@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
 
-    let filter = "hackrf";
+    let filter = "virtual";
     log::trace!("filter is {}", filter);
 
     let devarg = soapysdr::enumerate(filter)
@@ -67,12 +67,12 @@ fn main() -> anyhow::Result<()> {
 
     let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS, m, lp_cutoff);
 
-    let mut stream = dev.rx_stream::<Complex<i8>>(&[config.channels])?;
+    let mut read_stream = dev.rx_stream::<Complex<i8>>(&[config.channels])?;
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     // fixed size buffer
-    let mut buffer = vec![Complex::<i8>::new(0, 0); stream.mtu()?].into_boxed_slice();
+    let mut buffer = vec![Complex::<i8>::new(0, 0); read_stream.mtu()?].into_boxed_slice();
 
     // let mut is_buffer_valid = [false; 96];
     let mut sdridx_to_sender = vec![];
@@ -112,9 +112,9 @@ fn main() -> anyhow::Result<()> {
         .map(|_| Vec::with_capacity(131072 / (NUM_CHANNELS / 2)))
         .collect::<Vec<_>>();
 
-    stream.activate(None)?;
+    read_stream.activate(None)?;
     '_outer: for _ in 0.. {
-        let _read = stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+        let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         // assert_eq!(read, buffer.len());
 
         for fft in fft_result.iter_mut() {
@@ -141,7 +141,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    stream.deactivate(None)?;
+    read_stream.deactivate(None)?;
 
     Ok(())
 }
