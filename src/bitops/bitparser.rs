@@ -76,6 +76,15 @@ impl Preamble {
 
         Ok((remain, Self {}))
     }
+
+    pub fn encode(dest: &mut Vec<u8>) {
+        dest.push(0);
+        dest.push(1);
+        dest.push(0);
+        dest.push(1);
+        dest.push(0);
+        dest.push(1);
+    }
 }
 
 #[derive(Debug)]
@@ -94,6 +103,11 @@ impl RawByte {
 
         Ok((remain, Self { byte }))
     }
+    pub fn encode(&self, dest: &mut Vec<u8>) {
+        for i in 0..8 {
+            dest.push((self.byte >> i) & 1);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -111,6 +125,12 @@ impl WhitedByte {
         }
 
         Ok((remain, Self { byte }))
+    }
+
+    pub fn encode(&self, dest: &mut Vec<u8>, lsfr: &mut lfsr::LFSR0221) {
+        for i in 0..8 {
+            dest.push((self.byte >> i) ^ lsfr.next_white());
+        }
     }
 }
 
@@ -140,5 +160,43 @@ mod test {
 
         assert_eq!(remain.len(), 0);
         assert_eq!(raw_byte.byte, 0b10101010);
+    }
+
+    #[test]
+    fn uptest_raw_byte() {
+        let raw_byte = RawByte { byte: 0b10101010 };
+        let mut encoded = vec![];
+
+        raw_byte.encode(&mut encoded);
+        let (remain, decoded) = RawByte::parse(&encoded).expect("parse failed");
+
+        assert_eq!(decoded.byte, raw_byte.byte);
+        assert_eq!(remain.len(), 0);
+    }
+
+    #[test]
+    fn uptest_whited_byte() {
+        let whited = WhitedByte { byte: 0b10101010 };
+        let mut lfsr = lfsr::LFSR0221::from_ch(0);
+
+        let mut encoded = vec![];
+        whited.encode(&mut encoded, &mut lfsr);
+
+        let mut lfsr = lfsr::LFSR0221::from_ch(0);
+        let (remain, decoded) = WhitedByte::parse(&encoded, &mut lfsr).expect("parse failed");
+
+        assert_eq!(decoded.byte, whited.byte);
+        assert_eq!(remain.len(), 0);
+    }
+
+    #[test]
+    fn uptest_preamble() {
+        let mut encoded = vec![];
+
+        Preamble::encode(&mut encoded);
+
+        let (remain, _) = Preamble::parse(&encoded).expect("parse failed");
+
+        assert_eq!(remain.len(), 0);
     }
 }

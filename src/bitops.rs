@@ -93,6 +93,45 @@ pub fn bits_to_packet(bits: &[u8], freq: usize) -> Result<(&[u8], BytePacket)> {
     ))
 }
 
+pub fn packet_to_bits(bytes: &[u8], freq: usize, aa: u32) -> Vec<u8> {
+    let mut bits = Vec::new();
+
+    Preamble::encode(&mut bits);
+    
+    // offset = 2
+    bits.push(0);
+    bits.push(0);
+
+    for b in aa.to_le_bytes() {
+        RawByte { byte: b }.encode(&mut bits);
+    }
+
+    let mut whitening = lfsr::LFSR0221::from_freq(freq);
+
+    let header_padding = 0;
+    let length = bytes.len() as u8;
+
+    WhitedByte { byte: header_padding }.encode(&mut bits, &mut whitening);
+    WhitedByte { byte: length }.encode(&mut bits, &mut whitening);
+
+    for b in bytes {
+        WhitedByte { byte: *b }.encode(&mut bits, &mut whitening);
+    }
+
+    // add CRC
+    for _i in 0..3 {
+        WhitedByte { byte: 0 }.encode(&mut bits, &mut whitening); // FIXME
+    }
+
+    // add some garbages
+    bits.push(0);
+    bits.push(0);
+    bits.push(0);
+    bits.push(0);
+
+    bits
+}
+
 #[cfg(test)]
 mod test {
     #[test]
@@ -120,5 +159,20 @@ mod test {
         assert_eq!(byte_packet.delta, 6);
 
         assert_eq!(remain.len(), byte_packet.delta as usize);
+    }
+
+    #[test]
+    fn uptest_bytes() {
+        let bytes = b"hello world!";
+
+        let bits = super::packet_to_bits(bytes, 2426, 0x8e89bed6);
+
+        let (remain, byte_packet) = super::bits_to_packet(&bits, 2426).unwrap();
+
+        assert_eq!(byte_packet.aa, 0x8e89bed6);
+        assert_eq!(byte_packet.offset, 2);
+
+        assert_eq!(byte_packet.delta, 4);
+        assert_eq!(remain.len(), 4);
     }
 }

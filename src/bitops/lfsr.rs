@@ -70,4 +70,25 @@ mod test {
 
         assert_eq!(white, expect);
     }
+
+    #[test]
+    fn uptest_lsfr() {
+        let raw_bits = vec![0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1]; // random bits
+        
+        let mut lfsr = super::LFSR0221::from_ch(0);
+        let mut whited_bits = vec![];
+
+        for b in raw_bits.iter() {
+            whited_bits.push(b ^ lfsr.next_white());
+        }
+
+        let mut lfsr = super::LFSR0221::from_ch(0);
+        let mut dewhited_bits = vec![];
+        
+        for b in whited_bits.iter() {
+            dewhited_bits.push(b ^ lfsr.next_white());
+        }
+
+        assert_eq!(raw_bits, dewhited_bits);
+    }
 }
