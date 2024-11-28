@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
         center_freq: center_freq as f64 * 1.0e6,
         sample_rate: 20.0e6,
         bandwidth: 20.0e6,
-        gain: 32.,
+        gain: 64.,
     };
     SDR_CONFIG.lock().unwrap().replace(config.clone());
 
