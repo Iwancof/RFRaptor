@@ -2,6 +2,7 @@
 #![feature(portable_simd)]
 #![feature(test)]
 #![feature(try_blocks)]
+#![feature(generic_arg_infer)]
 
 mod bitops;
 mod bluetooth;
@@ -30,10 +31,25 @@ static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SD
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
+    std::env::set_var(
+        "SOAPY_SDR_PLUGIN_PATH",
+        "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
+    );
+
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
 
-    let filter = "virtual";
+    #[link(name = "fftw3f_threads")]
+    extern "C" {
+        fn fftwf_make_planner_thread_safe();
+    }
+
+    unsafe {
+        fftwf_make_planner_thread_safe()
+    }
+
+    // let filter = "virtual";
+    let filter = "hackrf";
     log::trace!("filter is {}", filter);
 
     let devarg = soapysdr::enumerate(filter)
@@ -188,7 +204,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                         let demodulated = fsk.demod(packet.data).ok_or(ErrorKind::Demod)?;
 
                         let (remain_bits, byte_packet) =
-                            bitops::bits_to_packet(&demodulated.bits, freq as usize)
+                            bitops::bits_to_packet(&demodulated, freq as usize)
                                 .map_err(|_| ErrorKind::Bitops)?;
 
                         if !remain_bits.is_empty() {

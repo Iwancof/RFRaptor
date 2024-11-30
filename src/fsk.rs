@@ -1,55 +1,28 @@
-use liquid_dsp_sys::{freqdem, freqdem_create, freqdem_destroy};
-
-use num_complex::Complex;
-use num_traits::Signed;
-
-/// at least 64 symbols are needed to calculate the median
-const MEDIAN_SYMBOLS: usize = 64usize;
+use liquid_dsp_sys::{fskdem, fskdem_create, fskdem_destroy, fskdem_reset, fskdem_demodulate};
 
 /// FSK demodulator
 #[derive(Debug)]
 pub struct FskDemod {
-    #[allow(unused)]
-    freqdem: freqdem,
-
-    /// number of samples per symbol
-    #[allow(unused)]
-    pub sample_per_symbol: usize,
-
-    /// number of symbols needed to calculate the median
-    #[allow(unused)]
-    pub need_symbol: usize,
-
-    /// limit of the frequency offset
-    #[allow(unused)]
-    pub max_freq_offset: f32,
-}
-
-/// FSK demodulated packet
-#[derive(Debug)]
-pub struct Packet {
-    /// demodulated bits
-    #[allow(unused)]
-    pub bits: Vec<u8>,
-
-    /// demodulated data
-    #[allow(unused)]
-    pub demod: Vec<f32>,
-
-    /// CFO (Carrier Frequency Offset)
-    #[allow(unused)]
-    pub cfo: f32,
-
-    /// frequency deviation
-    #[allow(unused)]
-    pub deviation: f32,
+    fskdem: fskdem,
 }
 
 impl Drop for FskDemod {
     fn drop(&mut self) {
         unsafe {
-            freqdem_destroy(self.freqdem);
+            fskdem_destroy(self.fskdem);
         }
+    }
+}
+
+fn prepare_fftw3f_thread_safety() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        fftwf_make_planner_thread_safe();
+    });
+
+    #[link(name = "fftw3f_threads")]
+    extern "C" {
+        fn fftwf_make_planner_thread_safe();
     }
 }
 
@@ -60,122 +33,80 @@ impl FskDemod {
     /// * `sample_rate` [Hz] - The sample rate of the incoming data
     /// * `num_channels` - The number of channels to use
     pub fn new(sample_rate: f32, num_channels: usize) -> Self {
-        let freqdem = unsafe { freqdem_create(0.8f32) };
+        prepare_fftw3f_thread_safety();
 
-        let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as usize;
-        Self {
-            freqdem,
-            sample_per_symbol,
-            need_symbol: MEDIAN_SYMBOLS,
-            max_freq_offset: 0.4f32,
-        }
-    }
+        let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
+        assert_eq!(sample_per_symbol, 2); // FIXME: only support 2 samples per symbol.
+                                          // m = 1, 2 ** m = sample_per_symbol = 2
+        let fskdem = unsafe { fskdem_create(1, sample_per_symbol, 0.4) };
 
-    // Number of samples needed to calculate the median
-    fn median_size(&self) -> usize {
-        self.sample_per_symbol * self.need_symbol
-    }
-
-    // Raw demodulation
-    fn liquid_demod(&mut self, data: &[Complex<f32>]) -> Vec<f32> {
-        use liquid_dsp_sys::*;
-
-        let mut demod: Vec<f32> = Vec::with_capacity(data.len());
-
-        unsafe {
-            freqdem_reset(self.freqdem);
-
-            freqdem_demodulate_block(
-                self.freqdem,
-                data.as_ptr() as *mut __BindgenComplex<f32>,
-                data.len() as _,
-                demod.as_mut_ptr(),
-            );
-
-            demod.set_len(data.len());
-        }
-
-        demod
+        Self { fskdem }
     }
 
     /// Demodulate the data
-    pub fn demod(&mut self, data: &[Complex<f32>]) -> Option<Packet> {
-        // too short to demodulate
-        if data.len() < 8 + self.median_size() {
-            return None;
+    pub fn demod(&mut self, data: &[num_complex::Complex<f32>]) -> Option<Vec<u8>> {
+        unsafe {
+            fskdem_reset(self.fskdem);
         }
 
-        // demodulate the data
-        let mut demod = self.liquid_demod(data);
+        let mut bits = Vec::new();
+        for d in data.chunks(2) {
+            let bit = unsafe {
+                fskdem_demodulate(self.fskdem, d.as_ptr() as *const _ as *mut _)
+            };
 
-        // get the CFO and deviation
-        let (cfo, deviation) = self.correction(&demod)?;
-        demod.iter_mut().for_each(|d| {
-            *d -= cfo;
-            *d /= deviation;
-        });
-
-        // prepare to calculate the EWMA
-        if demod[0].abs() > 1.5 {
-            demod[0] = 0.;
+            bits.push(bit as u8);
         }
 
-        let mut ewma = 0.;
-        let bits = demod
-            .iter()
-            // skip silence at the beginning
-            .skip_while(|v| {
-                const ALPHA: f32 = 0.8;
-                ewma = ewma * (1. - ALPHA) + v.abs() * ALPHA;
-
-                ewma <= 0.5
-            })
-            // each symbol has 2 samples (?)
-            .step_by(2)
-            .map(|v| if v > &0.0 { 1 } else { 0 })
-            .collect::<Vec<u8>>();
-
-        Some(Packet {
-            bits,
-            demod,
-            cfo,
-            deviation,
-        })
+        Some(bits)
     }
+}
 
-    // Calculate the CFO and deviation
-    fn correction(&self, demod: &[f32]) -> Option<(f32, f32)> {
-        let mut pos = Vec::new();
-        let mut neg = Vec::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        for d in demod.iter().skip(8).take(self.median_size()) {
-            // too large frequency offset
-            if d.abs() > self.max_freq_offset {
-                return None;
-            }
+    include!("./fsk_define_test.rs");
 
-            if d.is_positive() {
-                pos.push(*d);
-            } else {
-                neg.push(*d);
-            }
+    #[test]
+    fn test_simple_demod() {
+        let mut fsk = FskDemod::new(20e6, 20);
+        let packet = fsk.demod(&EXPECT_DATA_1_FREQ).expect("demod failed");
+
+        // assert_eq!(packet.bits, EXPECT_DATA_1_BITS);
+        let mut min = useful_number::updatable_num::UpdateToMinU32::new();
+
+        for offset in 0..3 {
+            let mut xor_count = 0;
+            packet[offset..]
+                .iter()
+                .zip(EXPECT_DATA_1_BITS.iter())
+                .for_each(|(a, b)| {
+                    if a != b {
+                        xor_count += 1;
+                    }
+                });
+
+            min.update(xor_count);
+        }
+        for offset in 0..3 {
+            let mut xor_count = 0;
+            EXPECT_DATA_1_BITS[offset..]
+                .iter()
+                .zip(packet.iter())
+                .for_each(|(a, b)| {
+                    if a != b {
+                        xor_count += 1;
+                    }
+                });
+
+            min.update(xor_count);
         }
 
-        // the data is too skewed
-        if pos.len() < self.need_symbol / 4 || neg.len() < self.need_symbol / 4 {
-            return None;
-        }
+        // assert!(min < 10);
 
-        // sort the data
-        pos.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        neg.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        // calculate the median excluding the outliers
-        let median = (pos[pos.len() * 3 / 4] + neg[neg.len() / 4]) / 2.0;
-
-        let cfo = median;
-        let deviation = pos[pos.len() * 3 / 4] - median;
-
-        Some((cfo, deviation))
+        let min = *min.get().unwrap();
+        let error_rate = min as f32 / EXPECT_DATA_1_BITS.len() as f32;
+        assert!(error_rate < 0.05);
     }
 }
