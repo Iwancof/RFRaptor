@@ -261,7 +261,7 @@ mod test {
 
     use std::simd::*;
 
-    include!("./channelizer_define_test.rs");
+    include!("./def_test_data/channelizer.rs");
 
     #[test]
     fn channelize_once() {

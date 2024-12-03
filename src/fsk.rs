@@ -197,7 +197,7 @@ impl FskMod {
 mod tests {
     use super::*;
 
-    include!("./fsk_define_test.rs");
+    include!("./def_test_data/fsk.rs");
 
     #[test]
     fn test_simple_demod() {
