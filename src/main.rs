@@ -201,7 +201,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             continue;
                         }
 
-                        let demodulated = fsk.demod(packet.data).ok_or(ErrorKind::Demod)?;
+                        let demodulated = fsk.demodulate(packet.data).ok_or(ErrorKind::Demod)?;
 
                         let (remain_bits, byte_packet) =
                             bitops::bits_to_packet(&demodulated, freq as usize)
