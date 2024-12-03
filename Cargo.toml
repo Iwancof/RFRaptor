@@ -26,6 +26,7 @@ num-complex = "0.4.6"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
 pretty-hex = "0.4.1"
+regex = "1.11.1"
 rustfft = "6.2.0"
 serde = "1.0.210"
 serde_derive = "1.0.210"
@@ -35,6 +36,7 @@ soapysdr = { version = "0.4.0", features = ["log"] }
 thread-priority = "1.1.0"
 tungstenite = "0.24.0"
 useful_number = "0.1.2"
+wrcap = { version = "0.1.0", path = "../../../Rust/wrcap" }
 zerocopy = "0.8.9"
 
 [dev-dependencies]

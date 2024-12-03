@@ -1,6 +1,5 @@
 use std::ffi::CStr;
 
-use anyhow::anyhow;
 use liquid_dsp_sys::{
     fskdem, fskdem_create, fskdem_demodulate, fskdem_destroy, fskdem_reset, fskmod, fskmod_create,
     fskmod_destroy, fskmod_modulate, fskmod_reset, liquid_error_info,
@@ -12,7 +11,7 @@ fn do_liquid<Ret, F: FnOnce() -> *mut Ret>(f: F) -> anyhow::Result<*mut Ret> {
     use wrcap::lent_stderr;
 
     let (ret, error) = lent_stderr()
-        .map_err(|_| anyhow!("failed to lent stderr"))?
+        .map_err(|_| anyhow::anyhow!("failed to lent stderr"))?
         .capture_string(f)?;
 
     if !ret.is_null() {
@@ -25,18 +24,13 @@ fn do_liquid<Ret, F: FnOnce() -> *mut Ret>(f: F) -> anyhow::Result<*mut Ret> {
         return Err(anyhow::anyhow!("error: {:?}", error));
     };
 
-    let code = capture
-        .get(1)
-        .ok_or(anyhow!("parse"))?
-        .as_str()
-        .parse::<u32>()?;
-    let source = capture.get(3).ok_or(anyhow!("parse"))?.as_str();
+    let content = capture.get(2).ok_or(anyhow::anyhow!("parse content"))?.as_str();
+    let source = capture
+        .get(3)
+        .ok_or(anyhow::anyhow!("parse line"))?
+        .as_str();
 
-    let message = unsafe { CStr::from_ptr(liquid_error_info(code)) }
-        .to_string_lossy()
-        .to_string();
-
-    Err(anyhow!("{}: {}", message, source))
+    anyhow::bail!("[{}] at [{}]", content, source);
 }
 
 /// FSK demodulator
@@ -44,12 +38,15 @@ fn do_liquid<Ret, F: FnOnce() -> *mut Ret>(f: F) -> anyhow::Result<*mut Ret> {
 pub struct FskDemod {
     #[doc(hidden)]
     fskdem: fskdem,
+
+    sample_per_symbol: u32,
+    bits_per_symbol: u32,
 }
 
 impl Drop for FskDemod {
     fn drop(&mut self) {
         unsafe {
-            fskdem_destroy(self.fskdem);
+            fskdem_destroy(self.fskdem); // not fail.
         }
     }
 }
@@ -79,12 +76,17 @@ impl FskDemod {
         prepare_fftw3f_thread_safety();
 
         let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
-        assert_eq!(sample_per_symbol, 2); // FIXME: only support 2 samples per symbol.
-                                          // m = 1, 2 ** m = sample_per_symbol = 2
-        let fskdem =
-            do_liquid(|| unsafe { fskdem_create(1, sample_per_symbol, bandwidth) }).expect("fskdem_create failed");
+        let bits_per_symbol = sample_per_symbol.trailing_zeros();
 
-        Self { fskdem }
+        let fskdem =
+            do_liquid(|| unsafe { fskdem_create(bits_per_symbol, sample_per_symbol, bandwidth) })
+                .expect("fskdem_create failed");
+
+        Self {
+            fskdem,
+            sample_per_symbol,
+            bits_per_symbol,
+        }
     }
 
     /// Create a new FSK demodulator
@@ -103,7 +105,7 @@ impl FskDemod {
         }
 
         let mut bits = Vec::new();
-        for d in data.chunks(2) {
+        for d in data.chunks(self.sample_per_symbol as usize) {
             // TODO: only support 2 samples per symbol
             let bit = unsafe {
                 // TODO: check return value
@@ -119,7 +121,11 @@ impl FskDemod {
 
 #[derive(Debug)]
 pub struct FskMod {
+    #[doc(hidden)]
     fskmod: fskmod,
+
+    sample_per_symbol: u32,
+    bits_per_symbol: u32,
 }
 
 impl Drop for FskMod {
@@ -142,12 +148,17 @@ impl FskMod {
         prepare_fftw3f_thread_safety();
 
         let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
-        assert_eq!(sample_per_symbol, 2); // TODO: only support 2 samples per symbol.
-                                          // m = 1, 2 ** m = sample_per_symbol = 2
-        let fskmod =
-            do_liquid(|| unsafe { fskmod_create(1, sample_per_symbol, bandwidth) }).expect("fskmod_create failed");
+        let bits_per_symbol = sample_per_symbol.trailing_zeros();
 
-        Self { fskmod }
+        let fskmod =
+            do_liquid(|| unsafe { fskmod_create(bits_per_symbol, sample_per_symbol, bandwidth) })
+                .expect("fskmod_create failed");
+
+        Self {
+            fskmod,
+            sample_per_symbol,
+            bits_per_symbol,
+        }
     }
 
     /// Create a new FSK modulator
@@ -167,12 +178,14 @@ impl FskMod {
         }
 
         for d in data {
-            let mut out = [num_complex::Complex::new(0.0, 0.0); 2];
+            let mut out =
+                vec![num_complex::Complex::new(0.0, 0.0); self.sample_per_symbol as usize];
             // TODO: only support 2 samples per symbol
             unsafe {
                 // TODO: check return value
-                fskmod_modulate(self.fskmod, *d as u32, &mut out as *mut _ as *mut _);
+                fskmod_modulate(self.fskmod, *d as u32, out.as_mut_ptr() as *mut _);
             }
+
             modulated.extend_from_slice(&out);
         }
 
@@ -223,7 +236,7 @@ mod tests {
 
         // assert!(min < 10);
 
-        let min = *min.get().unwrap();
+        let min = *min.get().expect("min failed");
         let error_rate = min as f32 / EXPECT_DATA_1_BITS.len() as f32;
         assert!(error_rate < 0.05);
     }
