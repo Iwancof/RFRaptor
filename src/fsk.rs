@@ -109,7 +109,7 @@ impl FskDemod {
             // TODO: only support 2 samples per symbol
             let bit = unsafe {
                 // TODO: check return value
-                fskdem_demodulate(self.fskdem, d.as_ptr() as *const _ as *mut _)
+                fskdem_demodulate(self.fskdem, d.as_ptr() as *mut _)
             };
 
             bits.push(bit as u8);
@@ -183,7 +183,7 @@ impl FskMod {
             // TODO: only support 2 samples per symbol
             unsafe {
                 // TODO: check return value
-                fskmod_modulate(self.fskmod, *d as u32, out.as_mut_ptr() as *mut _);
+                fskmod_modulate(self.fskmod, *d as u32, out.as_mut_ptr());
             }
 
             modulated.extend_from_slice(&out);

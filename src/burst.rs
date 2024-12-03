@@ -24,17 +24,12 @@ impl Crcf {
 
         Self { crcf }
     }
-    pub fn execute(&mut self, signal: Complex<f32>) -> (Complex<f32>, SquelchStatus) {
+    pub fn execute(&mut self, mut signal: Complex<f32>) -> (Complex<f32>, SquelchStatus) {
         use liquid_dsp_sys::*;
 
-        let mut value = __BindgenComplex {
-            re: signal.re,
-            im: signal.im,
-        };
+        unsafe { agc_crcf_execute(self.crcf as _, signal, &mut signal) };
 
-        unsafe { agc_crcf_execute(self.crcf as _, value, &mut value) };
-
-        (Complex::new(value.re, value.im), self.status())
+        (signal, self.status())
     }
 
     pub fn status(&self) -> SquelchStatus {

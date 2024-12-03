@@ -602,6 +602,7 @@ name = "liquid-dsp-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen 0.70.1",
+ "num-complex",
 ]
 
 [[package]]
