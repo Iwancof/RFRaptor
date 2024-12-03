@@ -1,8 +1,6 @@
-use std::ffi::CStr;
-
 use liquid_dsp_sys::{
     fskdem, fskdem_create, fskdem_demodulate, fskdem_destroy, fskdem_reset, fskmod, fskmod_create,
-    fskmod_destroy, fskmod_modulate, fskmod_reset, liquid_error_info,
+    fskmod_destroy, fskmod_modulate, fskmod_reset,
 };
 
 const DEFAULT_FSK_BANDWIDTH: f32 = 0.40; // ????
@@ -39,7 +37,12 @@ pub struct FskDemod {
     #[doc(hidden)]
     fskdem: fskdem,
 
+    /// The number of samples per symbol
+    #[allow(unused)]
     sample_per_symbol: u32,
+
+    /// The number of bits per symbol
+    #[allow(unused)]
     bits_per_symbol: u32,
 }
 
@@ -124,7 +127,12 @@ pub struct FskMod {
     #[doc(hidden)]
     fskmod: fskmod,
 
+    /// The number of samples per symbol
+    #[allow(unused)]
     sample_per_symbol: u32,
+
+    /// The number of bits per symbol
+    #[allow(unused)]
     bits_per_symbol: u32,
 }
 

@@ -18,7 +18,7 @@ biquad = "0.4.2"
 chrono = "0.4.38"
 env_logger = "0.11.5"
 libbtbb-sys = { version = "0.1.0", path = "../../../Rust/libbtbb-sys" }
-liquid-dsp-sys = { version = "0.1.0", path = "../../../Rust/liquid-dsp-sys", features = ["num-complex"] }
+liquid-dsp-sys = { version = "0.1.0", features = ["num-complex"] }
 log = "0.4.22"
 log-derive = "0.4.1"
 nom = "7.1.3"
