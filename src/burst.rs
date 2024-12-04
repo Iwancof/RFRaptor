@@ -3,44 +3,58 @@ use num_traits::FromPrimitive;
 
 use num_complex::Complex;
 
+use crate::liquid::{liquid_do_int, liquid_get_pointer};
+
 #[derive(Debug)]
 struct Crcf {
-    crcf: liquid_dsp_sys::agc_crcf,
+    crcf_s: std::ptr::NonNull<liquid_dsp_sys::agc_crcf_s>,
 }
 
 impl Crcf {
     pub fn new() -> Self {
         use liquid_dsp_sys::*;
         let crcf = unsafe {
-            let obj = agc_crcf_create();
-            agc_crcf_set_bandwidth(obj, 0.25);
-            agc_crcf_set_signal_level(obj, 1e-3);
+            let obj = liquid_get_pointer(|| agc_crcf_create()).expect("agc_crcf_create");
+            liquid_do_int(|| agc_crcf_set_bandwidth(obj.as_ptr(), 0.25))
+                .expect("agc_crcf_set_bandwidth");
+            liquid_do_int(|| agc_crcf_set_signal_level(obj.as_ptr(), 1e-3))
+                .expect("agc_crcf_set_signal_level");
 
-            agc_crcf_squelch_enable(obj);
-            agc_crcf_squelch_set_threshold(obj, -45.);
-            agc_crcf_squelch_set_timeout(obj, 100);
+            liquid_do_int(|| agc_crcf_squelch_enable(obj.as_ptr()))
+                .expect("agc_crcf_squelch_enable");
+            liquid_do_int(|| agc_crcf_squelch_set_threshold(obj.as_ptr(), -45.))
+                .expect("agc_crcf_squelch_set_threshold");
+            liquid_do_int(|| agc_crcf_squelch_set_timeout(obj.as_ptr(), 100))
+                .expect("agc_crcf_squelch_set_timeout");
+
             obj
         };
 
-        Self { crcf }
+        Self { crcf_s: crcf }
     }
+
+    fn crcf(&self) -> *mut liquid_dsp_sys::agc_crcf_s {
+        self.crcf_s.as_ptr()
+    }
+
     pub fn execute(&mut self, mut signal: Complex<f32>) -> (Complex<f32>, SquelchStatus) {
         use liquid_dsp_sys::*;
 
-        unsafe { agc_crcf_execute(self.crcf as _, signal, &mut signal) };
+        liquid_do_int(|| unsafe { agc_crcf_execute(self.crcf(), signal, &mut signal) })
+            .expect("agc_crcf_execute");
 
         (signal, self.status())
     }
 
     pub fn status(&self) -> SquelchStatus {
-        SquelchStatus::from_i32(unsafe { liquid_dsp_sys::agc_crcf_squelch_get_status(self.crcf) })
-            .unwrap()
+        SquelchStatus::from_i32(unsafe { liquid_dsp_sys::agc_crcf_squelch_get_status(self.crcf()) })
+            .expect("agc_crcf_squelch_get_status")
     }
 }
 
 impl Drop for Crcf {
     fn drop(&mut self) {
-        unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf) };
+        liquid_do_int(|| unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf()) }).expect("agc_crcf_destroy");
     }
 }
 
