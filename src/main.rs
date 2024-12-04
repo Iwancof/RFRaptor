@@ -10,6 +10,7 @@ mod burst;
 mod channelizer;
 mod fsk;
 mod sdr;
+mod liquid;
 
 use burst::Burst;
 use fsk::FskDemod;

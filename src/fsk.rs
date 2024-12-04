@@ -1,41 +1,19 @@
+use std::ptr::NonNull;
+
+use crate::liquid::{liquid_do_int, liquid_get_pointer};
+
 use liquid_dsp_sys::{
-    fskdem, fskdem_create, fskdem_demodulate, fskdem_destroy, fskdem_reset, fskmod, fskmod_create,
-    fskmod_destroy, fskmod_modulate, fskmod_reset,
+    fskdem_create, fskdem_demodulate, fskdem_destroy, fskdem_reset, fskdem_s, fskmod_create,
+    fskmod_destroy, fskmod_modulate, fskmod_reset, fskmod_s,
 };
 
 const DEFAULT_FSK_BANDWIDTH: f32 = 0.40; // ????
-
-fn do_liquid<Ret, F: FnOnce() -> *mut Ret>(f: F) -> anyhow::Result<*mut Ret> {
-    use wrcap::lent_stderr;
-
-    let (ret, error) = lent_stderr()
-        .map_err(|_| anyhow::anyhow!("failed to lent stderr"))?
-        .capture_string(f)?;
-
-    if !ret.is_null() {
-        return Ok(ret);
-    }
-
-    use regex::Regex;
-    let re = Regex::new(r"error \[([0-9]+)\]: (.*)\n  (.*)")?;
-    let Some(capture) = re.captures(&error) else {
-        return Err(anyhow::anyhow!("error: {:?}", error));
-    };
-
-    let content = capture.get(2).ok_or(anyhow::anyhow!("parse content"))?.as_str();
-    let source = capture
-        .get(3)
-        .ok_or(anyhow::anyhow!("parse line"))?
-        .as_str();
-
-    anyhow::bail!("[{}] at [{}]", content, source);
-}
 
 /// FSK demodulator
 #[derive(Debug)]
 pub struct FskDemod {
     #[doc(hidden)]
-    fskdem: fskdem,
+    fskdem: NonNull<fskdem_s>,
 
     /// The number of samples per symbol
     #[allow(unused)]
@@ -48,9 +26,10 @@ pub struct FskDemod {
 
 impl Drop for FskDemod {
     fn drop(&mut self) {
-        unsafe {
-            fskdem_destroy(self.fskdem); // not fail.
-        }
+        liquid_do_int(|| unsafe {
+            fskdem_destroy(self.fskdem.as_ptr()) // not fail.
+        })
+        .expect("fskdem_destroy failed");
     }
 }
 
@@ -81,9 +60,10 @@ impl FskDemod {
         let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
         let bits_per_symbol = sample_per_symbol.trailing_zeros();
 
-        let fskdem =
-            do_liquid(|| unsafe { fskdem_create(bits_per_symbol, sample_per_symbol, bandwidth) })
-                .expect("fskdem_create failed");
+        let fskdem = liquid_get_pointer(|| unsafe {
+            fskdem_create(bits_per_symbol, sample_per_symbol, bandwidth)
+        })
+        .expect("fskdem_create failed");
 
         Self {
             fskdem,
@@ -103,16 +83,15 @@ impl FskDemod {
 
     /// Demodulate the data
     pub fn demodulate(&mut self, data: &[num_complex::Complex<f32>]) -> Option<Vec<u8>> {
-        unsafe {
-            fskdem_reset(self.fskdem);
-        }
+        liquid_do_int(|| unsafe { fskdem_reset(self.fskdem.as_ptr()) })
+            .expect("fskdem_reset failed");
 
         let mut bits = Vec::new();
         for d in data.chunks(self.sample_per_symbol as usize) {
             // TODO: only support 2 samples per symbol
             let bit = unsafe {
                 // TODO: check return value
-                fskdem_demodulate(self.fskdem, d.as_ptr() as *mut _)
+                fskdem_demodulate(self.fskdem.as_ptr(), d.as_ptr() as *mut _)
             };
 
             bits.push(bit as u8);
@@ -125,7 +104,7 @@ impl FskDemod {
 #[derive(Debug)]
 pub struct FskMod {
     #[doc(hidden)]
-    fskmod: fskmod,
+    fskmod: NonNull<fskmod_s>,
 
     /// The number of samples per symbol
     #[allow(unused)]
@@ -139,7 +118,7 @@ pub struct FskMod {
 impl Drop for FskMod {
     fn drop(&mut self) {
         unsafe {
-            fskmod_destroy(self.fskmod);
+            fskmod_destroy(self.fskmod.as_ptr());
         }
     }
 }
@@ -158,9 +137,10 @@ impl FskMod {
         let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
         let bits_per_symbol = sample_per_symbol.trailing_zeros();
 
-        let fskmod =
-            do_liquid(|| unsafe { fskmod_create(bits_per_symbol, sample_per_symbol, bandwidth) })
-                .expect("fskmod_create failed");
+        let fskmod = liquid_get_pointer(|| unsafe {
+            fskmod_create(bits_per_symbol, sample_per_symbol, bandwidth)
+        })
+        .expect("fskmod_create failed");
 
         Self {
             fskmod,
@@ -181,9 +161,8 @@ impl FskMod {
     pub fn modulate(&mut self, data: &[u8]) -> Vec<num_complex::Complex<f32>> {
         let mut modulated = Vec::new();
 
-        unsafe {
-            fskmod_reset(self.fskmod);
-        }
+        liquid_do_int(|| unsafe { fskmod_reset(self.fskmod.as_ptr()) })
+            .expect("fskmod_reset failed");
 
         for d in data {
             let mut out =
@@ -191,7 +170,7 @@ impl FskMod {
             // TODO: only support 2 samples per symbol
             unsafe {
                 // TODO: check return value
-                fskmod_modulate(self.fskmod, *d as u32, out.as_mut_ptr());
+                fskmod_modulate(self.fskmod.as_ptr(), *d as u32, out.as_mut_ptr());
             }
 
             modulated.extend_from_slice(&out);
@@ -265,6 +244,6 @@ mod tests {
     #[should_panic]
     #[test]
     fn do_liquid_test() {
-        let mut invalid_config = FskDemod::new_with_band(20e6, 20, 0.50);
+        let _invalid_config = FskDemod::new_with_band(20e6, 20, 0.50);
     }
 }
