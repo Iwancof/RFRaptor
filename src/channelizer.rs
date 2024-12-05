@@ -30,6 +30,8 @@ pub struct Channelizer {
 }
 
 impl Channelizer {
+    const SCALE: f32 = 1.0 / 32768.0;
+
     /// Create a new Channelizer by specifying the number of channels, the number of taps, and the
     /// low-pass cutoff frequency.
     /// This uses a Kaiser window to generate the filter taps internally.
@@ -42,6 +44,7 @@ impl Channelizer {
         Self {
             num_channels,
             channel_half: num_channels / 2,
+
             filter_bank: FilterBank::from_filter(
                 &generate_kaiser(num_channels, m, lp_cutoff),
                 num_channels,
@@ -57,15 +60,31 @@ impl Channelizer {
         }
     }
 
-    /// Channelize the input data.
-    /// The input data must be exactly half the number of channels.
-    pub fn channelize(&mut self, input: &[Complex<i8>]) -> &mut Vec<Complex<f32>> {
+    fn get_offset(&self) -> usize {
+        // Depending on the flag, we use a different window and subfilters.
+        if self.flag {
+            self.channel_half
+        } else {
+            0
+        }
+    }
+
+    // push_to_window explanation:
+
+    // if self.flag == true:
+    // [_, _, _, _, ..., push(input[last]), push(input[last-1]), ..., push(input[0])]
+    //                   ^ half of the channel
+    //
+    // if self.flag == false:
+    // [push(input[last]), push(input[last-1]), ..., push(input[0]), _, _, _, _, ...]
+    //                                                               ^ half of the channel
+
+    #[allow(unused)]
+    fn push_to_window_1(&mut self, input: &[Complex<i8>]) {
         debug_assert_eq!(input.len(), self.channel_half);
 
-        // Depending on the flag, we use a different window and subfilters.
-        let offset = if self.flag { self.channel_half } else { 0 };
+        let offset = self.get_offset();
 
-        // push input to the window
         for (window, x) in self.windows[offset..]
             .iter_mut()
             .take(self.channel_half)
@@ -74,14 +93,28 @@ impl Channelizer {
         {
             window.push(*x);
         }
+    }
 
-        // if self.flag == true:
-        // [_, _, _, _, ..., push(input[last]), push(input[last-1]), ..., push(input[0])]
-        //                   ^ half of the channel
-        //
-        // if self.flag == false:
-        // [push(input[last]), push(input[last-1]), ..., push(input[0]), _, _, _, _, ...]
-        //                                                               ^ half of the channel
+    #[allow(unused)]
+    fn push_to_window_2(&mut self, input: &[Complex<i8>]) {
+        if self.flag {
+            for (i, idx) in input.iter().enumerate() {
+                let window_idx = self.num_channels - i - 1;
+
+                self.windows[window_idx].push(*idx);
+            }
+        } else {
+            for (i, idx) in input.iter().enumerate() {
+                let window_idx = self.channel_half - i - 1;
+
+                self.windows[window_idx].push(*idx);
+            }
+        }
+    }
+
+    #[allow(unused)]
+    pub fn apply_1(&mut self) {
+        let offset = self.get_offset();
 
         self.int_work_buffer.clear();
         for (ch_idx, window) in self.windows.iter_mut().enumerate() {
@@ -93,9 +126,50 @@ impl Channelizer {
 
         self.float_work_buffer.clear();
         for Complex { re, im } in self.int_work_buffer.iter() {
-            self.float_work_buffer
-                .push(Complex::new((*re as f32) / 32768.0, (*im as f32) / 32768.0));
+            self.float_work_buffer.push(Complex::new(
+                (*re as f32) * Self::SCALE,
+                (*im as f32) * Self::SCALE,
+            ));
         }
+    }
+
+    #[allow(unused)]
+    pub fn apply_2(&mut self) {
+        let offset = self.get_offset();
+
+        self.float_work_buffer.clear();
+        for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            let current_pos = (offset + ch_idx) % self.num_channels;
+            let sf = &self.filter_bank.subfilters[current_pos];
+
+            let Complex { re, im } = window.apply_filter(sf);
+            self.float_work_buffer.push(Complex::new(
+                re as f32 * Self::SCALE,
+                im as f32 * Self::SCALE,
+            ));
+        }
+    }
+
+    #[allow(unused)]
+    pub fn apply_3(&mut self) {
+        let offset = self.get_offset();
+
+        self.float_work_buffer.clear();
+        for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            let current_pos = (offset + ch_idx) % self.num_channels;
+            let sf = &self.filter_bank.subfilters[current_pos];
+
+            self.float_work_buffer.push(window.apply_filter_float(sf)); // apply kaiser window
+        }
+    }
+
+    /// Channelize the input data.
+    /// The input data must be exactly half the number of channels.
+    pub fn channelize(&mut self, input: &[Complex<i8>]) -> &mut Vec<Complex<f32>> {
+        debug_assert_eq!(input.len(), self.channel_half);
+
+        self.push_to_window_2(input);
+        self.apply_2();
 
         self.flag = !self.flag;
 
@@ -230,6 +304,29 @@ impl SlidingWindow {
         }
 
         Complex::new(out[0] >> 8, out[1] >> 8) // due to sdr's signal format
+    }
+
+    pub(crate) fn apply_filter_float(&self, filter: &[i32]) -> Complex<f32> {
+        debug_assert_eq!(filter.len(), self.len);
+        debug_assert_eq!(self.len, 8); // FIXME: remove this constraint
+
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8_float(r: *const i32, i: *const i32, h: *const i32, out: *mut f32);
+        }
+
+        let mut out: [f32; 2] = [0.0; 2];
+
+        unsafe {
+            dotprod_8_float(
+                self.r.as_ptr().add(self.current_pos),
+                self.i.as_ptr().add(self.current_pos),
+                filter.as_ptr(),
+                out.as_mut_ptr(),
+            );
+        }
+
+        Complex::new(out[0], out[1])
     }
 }
 
@@ -500,6 +597,117 @@ mod test {
 
             test::black_box(re);
             test::black_box(im);
+        });
+    }
+    
+    fn create_mock() -> (Channelizer, Vec<Vec<Complex<i8>>>) {
+        let channel = 20;
+        let m = 4;
+        let lp_cutoff = 0.75;
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let magic = Channelizer::new(channel, m, lp_cutoff);
+
+        let mut data = vec![];
+        for _i in 0..100000 {
+            let shot = (0..10)
+                .map(|_| Complex::new(rng.gen(), rng.gen()))
+                .collect::<Vec<_>>();
+
+            data.push(shot);
+        }
+
+        (magic, data)
+    }
+
+    #[bench]
+    fn w1_a1(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_1(shot);
+                magic.apply_1();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
+        });
+    }
+
+    #[bench]
+    fn w1_a2(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_1(shot);
+                magic.apply_2();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
+        });
+    }
+
+    #[bench]
+    fn w1_a3(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_1(shot);
+                magic.apply_3();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
+        });
+    }
+
+    #[bench]
+    fn w2_a1(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_2(shot);
+                magic.apply_1();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
+        });
+    }
+
+    #[bench]
+    fn w2_a2(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_2(shot);
+                magic.apply_2();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
+        });
+    }
+
+    #[bench]
+    fn w2_a3(b: &mut test::Bencher) {
+        let (mut magic, data) = create_mock();
+
+        b.iter(|| {
+            for shot in data.iter() {
+                magic.push_to_window_2(shot);
+                magic.apply_3();
+
+                magic.flag = !magic.flag;
+                test::black_box(&magic.float_work_buffer);
+            }
         });
     }
 }
