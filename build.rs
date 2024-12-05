@@ -1,4 +1,6 @@
 fn main() {
+    println!("cargo:rerun-if-changed=src/apply_filter.c");
+
     use cc::Build;
 
     // use AVX2
@@ -12,5 +14,4 @@ fn main() {
         .extra_warnings(true)
         .compile("libapply_filter.a");
 
-    println!("cargo:rerun-if-changed=src/apply_filter.c");
 }
