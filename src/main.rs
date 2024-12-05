@@ -9,20 +9,21 @@ mod bluetooth;
 mod burst;
 mod channelizer;
 mod fsk;
-mod sdr;
 mod liquid;
+mod sdr;
 
 use burst::Burst;
 use fsk::FskDemod;
 use sdr::SDRConfig;
 
 use anyhow::Context;
-
 use num_complex::Complex;
-
 use tungstenite::accept;
 
-const NUM_CHANNELS: usize = 20usize;
+#[allow(unused_imports)] // use with permission
+use thread_priority::{set_current_thread_priority, ThreadPriority};
+
+const NUM_CHANNELS: usize = 16usize;
 
 type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
 
@@ -45,9 +46,7 @@ fn main() -> anyhow::Result<()> {
         fn fftwf_make_planner_thread_safe();
     }
 
-    unsafe {
-        fftwf_make_planner_thread_safe()
-    }
+    unsafe { fftwf_make_planner_thread_safe() }
 
     // let filter = "virtual";
     let filter = "hackrf";
@@ -73,8 +72,10 @@ fn main() -> anyhow::Result<()> {
         channels: 0,
         num_channels: NUM_CHANNELS,
         center_freq: center_freq as f64 * 1.0e6,
-        sample_rate: 20.0e6,
-        bandwidth: 20.0e6,
+        // sample_rate: 20.0e6,
+        // bandwidth: 20.0e6,
+        sample_rate: NUM_CHANNELS as f64 * 1.0e6,
+        bandwidth: NUM_CHANNELS as f64 * 1.0e6,
         gain: 64.,
     };
     SDR_CONFIG.lock().unwrap().replace(config.clone());
@@ -128,6 +129,9 @@ fn main() -> anyhow::Result<()> {
     let mut fft_result: Vec<Vec<Complex<f32>>> = (0..NUM_CHANNELS)
         .map(|_| Vec::with_capacity(131072 / (NUM_CHANNELS / 2)))
         .collect::<Vec<_>>();
+
+    // set thread priority
+    // set_current_thread_priority(ThreadPriority::Max).unwrap();
 
     read_stream.activate(None)?;
     '_outer: for _ in 0.. {
