@@ -23,7 +23,7 @@ pub struct SDRConfig {
 
 impl SDRConfig {
     pub fn set(&self, dev: &soapysdr::Device) -> anyhow::Result<()> {
-        for channel in 0..self.channels {
+        for channel in 0..=self.channels {
             dev.set_frequency(Rx, channel, self.center_freq, ())?;
             dev.set_sample_rate(Rx, channel, self.sample_rate)?;
             dev.set_bandwidth(Rx, channel, self.bandwidth)?;
