@@ -6,11 +6,11 @@ use num_complex::Complex;
 use crate::liquid::{liquid_do_int, liquid_get_pointer};
 
 #[derive(Debug)]
-struct Crcf {
+struct Agc {
     crcf_s: std::ptr::NonNull<liquid_dsp_sys::agc_crcf_s>,
 }
 
-impl Crcf {
+impl Agc {
     pub fn new() -> Self {
         use liquid_dsp_sys::*;
         let crcf = unsafe {
@@ -52,7 +52,7 @@ impl Crcf {
     }
 }
 
-impl Drop for Crcf {
+impl Drop for Agc {
     fn drop(&mut self) {
         liquid_do_int(|| unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf()) }).expect("agc_crcf_destroy");
     }
@@ -60,7 +60,7 @@ impl Drop for Crcf {
 
 #[derive(Debug)]
 pub struct Burst {
-    crcf: Crcf,
+    crcf: Agc,
     in_burst: bool,
     burst: Vec<Complex<f32>>,
 }
@@ -90,7 +90,7 @@ pub struct Packet<'a> {
 impl Burst {
     pub fn new() -> Self {
         Self {
-            crcf: Crcf::new(),
+            crcf: Agc::new(),
             in_burst: false,
             burst: Vec::new(),
         }
