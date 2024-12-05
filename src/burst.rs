@@ -124,5 +124,3 @@ impl Burst {
         None
     }
 }
-
-unsafe impl Send for Burst {}
