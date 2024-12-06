@@ -186,7 +186,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
             #[derive(Debug)]
             enum ErrorKind {
                 Catcher,
-                Demod,
+                Demod(anyhow::Error),
                 Bitops,
                 Bluetooth,
             }
@@ -206,10 +206,11 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             continue;
                         }
 
-                        let demodulated = fsk.demodulate(packet.data).ok_or(ErrorKind::Demod)?;
+                        let demodulated =
+                            fsk.demodulate(packet.data).map_err(|e| ErrorKind::Demod(e))?;
 
                         let (remain_bits, byte_packet) =
-                            bitops::bits_to_packet(&demodulated, freq as usize)
+                            bitops::bits_to_packet(&demodulated.bits, freq as usize)
                                 .map_err(|_| ErrorKind::Bitops)?;
 
                         if !remain_bits.is_empty() {
@@ -238,7 +239,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                         ErrorKind::Catcher => {
                             //
                         }
-                        ErrorKind::Demod => {
+                        ErrorKind::Demod(_) => {
                             //
                         }
                         ErrorKind::Bitops => {
