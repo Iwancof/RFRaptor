@@ -7,8 +7,7 @@ use num_complex::Complex;
 
 use liquid_dsp_sys::{
     freqdem, freqdem_create, freqdem_destroy, freqdem_s, freqmod, freqmod_create, freqmod_destroy,
-    freqmod_modulate_block, freqmod_reset, freqmod_s, fskmod_create, fskmod_destroy,
-    fskmod_modulate, fskmod_reset, fskmod_s,
+    freqmod_modulate_block, freqmod_reset, freqmod_s,
 };
 use num_traits::Signed;
 
