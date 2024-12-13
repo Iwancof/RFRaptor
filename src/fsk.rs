@@ -6,7 +6,8 @@ use anyhow::Context;
 use num_complex::Complex;
 
 use liquid_dsp_sys::{
-    freqdem, freqdem_create, freqdem_destroy, freqdem_s, fskmod_create, fskmod_destroy,
+    freqdem, freqdem_create, freqdem_destroy, freqdem_s, freqmod, freqmod_create, freqmod_destroy,
+    freqmod_modulate_block, freqmod_reset, freqmod_s, fskmod_create, fskmod_destroy,
     fskmod_modulate, fskmod_reset, fskmod_s,
 };
 use num_traits::Signed;
@@ -98,6 +99,7 @@ impl FskDemod {
         unsafe {
             liquid_do_int(|| freqdem_reset(self.freqdem())).context("freqdem_reset failed")?;
 
+            // TODO: add safety checks
             liquid_do_int(|| {
                 freqdem_demodulate_block(
                     self.freqdem(),
@@ -147,7 +149,7 @@ impl FskDemod {
                 ewma <= 0.5
             })
             // each symbol has 2 samples (?)
-            .step_by(2)
+            .step_by(self.sample_per_symbol)
             .map(|v| if v > &0.0 { 1 } else { 0 })
             .collect::<Vec<u8>>();
 
@@ -200,7 +202,7 @@ impl FskDemod {
 #[allow(dead_code)]
 pub struct FskMod {
     #[doc(hidden)]
-    fskmod: NonNull<fskmod_s>,
+    freqmod: NonNull<freqmod_s>,
 
     /// The number of samples per symbol
     #[allow(unused)]
@@ -214,7 +216,7 @@ pub struct FskMod {
 impl Drop for FskMod {
     fn drop(&mut self) {
         unsafe {
-            fskmod_destroy(self.fskmod.as_ptr());
+            liquid_do_int(|| freqmod_destroy(self.freqmod())).expect("freqmod_destroy failed");
         }
     }
 }
@@ -228,64 +230,55 @@ impl FskMod {
     /// # Arguments
     /// * `sample_rate` [Hz] - The sample rate of the transmitted data
     /// * `num_channels` - The number of channels to use
-    pub fn new_with_band(sample_rate: f32, num_channels: usize, bandwidth: f32) -> Self {
-        prepare_fftw3f_thread_safety();
+    pub fn new(sample_rate: f32, num_channels: u32) -> Self {
+        let freqmod =
+            liquid_get_pointer(|| unsafe { freqmod_create(0.8f32) }).expect("fskmod_create failed");
 
         let sample_per_symbol = (sample_rate / (num_channels as f32) / 1e6f32 * 2.0) as u32;
         let bits_per_symbol = sample_per_symbol.trailing_zeros();
 
-        let fskmod = liquid_get_pointer(|| unsafe {
-            fskmod_create(bits_per_symbol, sample_per_symbol, bandwidth)
-        })
-        .expect("fskmod_create failed");
-
         Self {
-            fskmod,
+            freqmod,
             sample_per_symbol,
             bits_per_symbol,
         }
     }
 
-    /// Create a new FSK modulator
-    ///
-    /// # Arguments
-    /// * `sample_rate` [Hz] - The sample rate of the transmitted data
-    /// * `num_channels` - The number of channels to use
-    pub fn new(sample_rate: f32, num_channels: usize) -> Self {
-        Self::new_with_band(sample_rate, num_channels, Self::DEFAULT_MODULATE_BANDWITH)
+    fn freqmod(&self) -> freqmod {
+        self.freqmod.as_ptr()
     }
 
-    pub fn modulate(&mut self, data: &[u8]) -> Vec<num_complex::Complex<f32>> {
-        let mut modulated = Vec::new();
+    fn liquid_modulate(&mut self, data: &[f32]) -> anyhow::Result<Vec<num_complex::Complex<f32>>> {
+        let mut modulated = Vec::with_capacity(data.len());
 
-        liquid_do_int(|| unsafe { fskmod_reset(self.fskmod.as_ptr()) })
-            .expect("fskmod_reset failed");
+        unsafe {
+            liquid_do_int(|| freqmod_reset(self.freqmod())).context("freqmod_reset failed")?;
 
-        for d in data {
-            let mut out =
-                vec![num_complex::Complex::new(0.0, 0.0); self.sample_per_symbol as usize];
-            // TODO: only support 2 samples per symbol
-            unsafe {
-                // TODO: check return value
-                fskmod_modulate(self.fskmod.as_ptr(), *d as u32, out.as_mut_ptr());
-            }
+            // TODO: add safety checks
+            liquid_do_int(|| {
+                freqmod_modulate_block(
+                    self.freqmod(),
+                    data.as_ptr() as *mut _,
+                    data.len() as _,
+                    modulated.as_mut_ptr(),
+                )
+            })
+            .context("fskmod_modulate failed")?;
 
-            modulated.extend_from_slice(&out);
+            modulated.set_len(data.len());
         }
 
-        modulated
+        Ok(modulated)
     }
-}
 
-fn prepare_fftw3f_thread_safety() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| unsafe {
-        fftwf_make_planner_thread_safe();
-    });
+    pub fn modulate(&mut self, data: &[u8]) -> anyhow::Result<Vec<num_complex::Complex<f32>>> {
+        let mut f = vec![];
 
-    #[link(name = "fftw3f_threads")]
-    extern "C" {
-        fn fftwf_make_planner_thread_safe();
+        f.extend(data.iter().flat_map(|b| {
+            (0..=self.bits_per_symbol).map(move |_| if b & 1 != 0 { -1.0 } else { 1.0 })
+        }));
+
+        self.liquid_modulate(&f)
     }
 }
 
@@ -342,7 +335,8 @@ mod tests {
         let mut modulater = FskMod::new(20e6, 20);
         let packet = EXPECT_DATA_1_BITS.to_vec();
 
-        let modulated = modulater.modulate(&packet);
+        let modulated = modulater.modulate(&packet).expect("modul failed");
+        println!("{:?}", modulated);
 
         let mut demodulater = FskDemod::new(20e6, 20);
         let demodulated = demodulater.demodulate(&modulated).expect("demod failed");
@@ -350,9 +344,11 @@ mod tests {
         assert_eq!(packet, demodulated.bits);
     }
 
+    /*
     #[should_panic]
     #[test]
     fn do_liquid_test() {
-        let _invalid_config = FskMod::new_with_band(20e6, 20, 0.50);
+        // let _invalid_config = FskMod::new_with_band(20e6, 20, 0.50);
     }
+    */
 }
