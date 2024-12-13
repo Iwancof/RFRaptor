@@ -23,7 +23,7 @@ use tungstenite::accept;
 #[allow(unused_imports)] // use with permission
 use thread_priority::{set_current_thread_priority, ThreadPriority};
 
-const NUM_CHANNELS: usize = 16usize;
+const NUM_CHANNELS: usize = 20usize;
 
 type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
 
@@ -239,7 +239,8 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                         ErrorKind::Catcher => {
                             //
                         }
-                        ErrorKind::Demod(_) => {
+                        ErrorKind::Demod(d) => {
+                            // log::error!("failed to demodulate: {}", d);
                             //
                         }
                         ErrorKind::Bitops => {

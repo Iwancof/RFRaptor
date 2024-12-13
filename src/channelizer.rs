@@ -36,7 +36,7 @@ impl Channelizer {
     /// low-pass cutoff frequency.
     /// This uses a Kaiser window to generate the filter taps internally.
     pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
-        let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
+        let fft = rustfft::FftPlanner::new().plan_fft_forward(num_channels);
         let windows = (0..num_channels)
             .map(|_| SlidingWindow::new(2 * m))
             .collect::<Vec<_>>();
@@ -349,6 +349,8 @@ fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
     buffer
 }
 
+pub struct Synthesizer {}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -455,6 +457,23 @@ mod test {
             assert_eq!(window.r.iter().map(|x| x << 8).collect::<Vec<_>>(), r);
             assert_eq!(window.i.iter().map(|x| x << 8).collect::<Vec<_>>(), i);
         }
+    }
+
+    #[test]
+    fn uptest_channelizer() {
+        let channel = 20;
+        let m = 4;
+        let lp_cutoff = 0.75;
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+        let data: Vec<Complex<i8>> = (0..10)
+            .map(|_| Complex::new(rng.gen(), rng.gen()))
+            .collect::<Vec<_>>();
+
+        let mut magic = Channelizer::new(channel, m, lp_cutoff);
+
+        let got = magic.channelize_fft(&data);
+        panic!("{:?}", got);
     }
 
     extern crate test;
@@ -599,7 +618,7 @@ mod test {
             test::black_box(im);
         });
     }
-    
+
     fn create_mock() -> (Channelizer, Vec<Vec<Complex<i8>>>) {
         let channel = 20;
         let m = 4;
