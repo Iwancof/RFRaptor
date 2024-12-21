@@ -35,7 +35,8 @@ static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SD
 fn main() -> anyhow::Result<()> {
     std::env::set_var(
         "SOAPY_SDR_PLUGIN_PATH",
-        "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
+        // "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
+        "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-file/build",
     );
 
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
@@ -49,14 +50,17 @@ fn main() -> anyhow::Result<()> {
     unsafe { fftwf_make_planner_thread_safe() }
 
     // let filter = "virtual";
-    let filter = "hackrf";
+    // let filter = "hackrf";
+    let filter = "file";
     log::trace!("filter is {}", filter);
 
-    let devarg = soapysdr::enumerate(filter)
+    let mut devarg = soapysdr::enumerate(filter)
         .context("failed to enumerate devices")?
         .into_iter()
         .next()
         .context("No devices found")?;
+    devarg.set("path", "/tmp/out.txt");
+
     log::trace!("found device {}", devarg);
 
     let dev = soapysdr::Device::new(devarg)?;
@@ -91,6 +95,7 @@ fn main() -> anyhow::Result<()> {
 
     // fixed size buffer
     let mut buffer = vec![Complex::<i8>::new(0, 0); read_stream.mtu()?].into_boxed_slice();
+    println!("mtu: {}", read_stream.mtu()?);
 
     // let mut is_buffer_valid = [false; 96];
     let mut sdridx_to_sender = vec![];
@@ -222,8 +227,6 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             .map_err(|_| ErrorKind::Bluetooth)?;
 
                         PACKETS.lock().unwrap().push_back(bt.clone());
-                        log::info!("get");
-                        /*
                         if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
                             log::info!("{}", adv);
@@ -232,7 +235,6 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             // let hex = pretty_hex::config_hex(&bt.remain, cfg);
                             // log::info!("\n{}", hex);
                         }
-                        */
                     };
 
                     let Err(kind) = ret else {
