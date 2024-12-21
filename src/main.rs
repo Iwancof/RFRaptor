@@ -81,7 +81,7 @@ fn main() -> anyhow::Result<()> {
     SDR_CONFIG.lock().unwrap().replace(config.clone());
 
     log::info!("config = {}", config);
-    config.set(&dev)?;
+    // config.set(&dev)?;
 
     let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS, m, lp_cutoff);
 
@@ -206,8 +206,9 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             continue;
                         }
 
-                        let demodulated =
-                            fsk.demodulate(packet.data).map_err(|e| ErrorKind::Demod(e))?;
+                        let demodulated = fsk
+                            .demodulate(packet.data)
+                            .map_err(|e| ErrorKind::Demod(e))?;
 
                         let (remain_bits, byte_packet) =
                             bitops::bits_to_packet(&demodulated.bits, freq as usize)
@@ -221,6 +222,8 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             .map_err(|_| ErrorKind::Bluetooth)?;
 
                         PACKETS.lock().unwrap().push_back(bt.clone());
+                        log::info!("get");
+                        /*
                         if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
                             log::info!("{}", adv);
@@ -229,6 +232,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
                             // let hex = pretty_hex::config_hex(&bt.remain, cfg);
                             // log::info!("\n{}", hex);
                         }
+                        */
                     };
 
                     let Err(kind) = ret else {
