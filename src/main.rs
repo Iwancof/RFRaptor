@@ -22,6 +22,8 @@ use anyhow::Context;
 use num_complex::Complex;
 use tungstenite::accept;
 
+use clap::{Parser, Subcommand};
+
 #[allow(unused_imports)] // use with permission
 use thread_priority::{set_current_thread_priority, ThreadPriority};
 
@@ -32,6 +34,39 @@ type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
 // Config at runtime
 static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
     const { std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::Mutex::new(None))) };
+
+#[derive(Parser, Debug)]
+#[command(
+    name = format!("hydro-strike CLI Tool v{} hash={}", env!("CARGO_PKG_VERSION"), env!("GIT_HASH")),
+    version = format!("{}-{}", env!("CARGO_PKG_VERSION"), env!("GIT_HASH")),
+    about = "Welcome to hydro-strike CLI Tool",
+)]
+
+struct Args {
+    /// The type of operation to perform
+    #[arg(short, long, value_parser = ["hackrf", "virtual", "file"])]
+    device: String,
+
+    /// Additional options based on the type
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Options for hackrf type
+    Hackrf {
+        /// Frequency to use (default: 2427)
+        #[arg(short, long, default_value_t = 2427)]
+        freq: isize,
+    },
+    /// Options for file type
+    File {
+        /// Path to the file
+        #[arg(short, long)]
+        path: String,
+    },
+}
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
@@ -44,39 +79,52 @@ fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
 
-    #[link(name = "fftw3f_threads")]
-    extern "C" {
-        fn fftwf_make_planner_thread_safe();
-    }
+    let args = Args::parse();
 
-    unsafe { fftwf_make_planner_thread_safe() }
+    let (filter, join_path) = match args.device.as_str() {
+        "hackrf" => ("hackrf", "SoapyHackRF/build"),
+        "virtual" => ("virtual", "soapy-utils/soapy-virtual/build"),
+        "file" => ("file", "soapy-utils/soapy-file/build"),
+        _ => unreachable!(),
+    };
 
-    // let filter = "virtual";
-    let filter = "hackrf";
-    // let filter = "file";
-    log::trace!("filter is {}", filter);
+    let plugin_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(join_path);
+
+    std::env::set_var("SOAPY_SDR_PLUGIN_PATH", &plugin_path);
+
+    log::trace!("filter: {}, plugin_path: {}", filter, plugin_path.display());
 
     let mut devarg = soapysdr::enumerate(filter)
         .context("failed to enumerate devices")?
         .into_iter()
         .next()
         .context("No devices found")?;
-    devarg.set("path", "/tmp/out.txt");
 
     log::trace!("found device {}", devarg);
 
+    if args.device == "file" {
+        if let Some(Command::File { ref path }) = args.command {
+            devarg.set("path", path.clone());
+        } else {
+            panic!("file type requires path");
+        }
+    }
+
     let dev = soapysdr::Device::new(devarg)?;
 
-    // let center_freq = 2480;
-    // let center_freq = 2401;
-    let center_freq = 2427;
+    let center_freq = match args.command {
+        Some(Command::Hackrf { ref freq }) => *freq,
+        _ => 2427,
+    };
+
+    let use_hackrf = args.device == "hackrf";
+
+    log::trace!("center_freq: {}", center_freq);
 
     let config = SDRConfig {
         channels: 0,
         num_channels: NUM_CHANNELS,
         center_freq: center_freq as f64 * 1.0e6,
-        // sample_rate: 20.0e6,
-        // bandwidth: 20.0e6,
         sample_rate: NUM_CHANNELS as f64 * 1.0e6,
         bandwidth: NUM_CHANNELS as f64 * 1.0e6,
         gain: 64.,
@@ -142,9 +190,15 @@ fn main() -> anyhow::Result<()> {
         let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         // assert_eq!(read, buffer.len());
 
-        let remain_count = dev.channel_info(soapysdr::Direction::Rx, 0)?.get("buffer_count").expect("are you using original SoapyHackRF?").parse::<usize>()?;
-        if 1000 < remain_count {
-            log::warn!("processing too slow: {}", remain_count);
+        if use_hackrf {
+            let remain_count = dev
+                .channel_info(soapysdr::Direction::Rx, 0)?
+                .get("buffer_count")
+                .expect("are you using original SoapyHackRF?")
+                .parse::<usize>()?;
+            if 1000 < remain_count {
+                log::warn!("processing too slow: {}", remain_count);
+            }
         }
 
         for fft in fft_result.iter_mut() {

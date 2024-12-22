@@ -14,7 +14,7 @@ anyhow = { version = "1.0.86", features = ["backtrace"] }
 az = "1.2.1"
 biquad = "0.4.2"
 chrono = "0.4.38"
-clap = "4.5.23"
+clap = { version = "4.5.23", features = ["derive", "string"] }
 env_logger = "0.11.5"
 libbtbb-sys = { version = "0.1.0", path = "../../../Rust/libbtbb-sys" }
 # liquid-dsp-sys = { version = "0.1.0", features = ["num-complex"] }
