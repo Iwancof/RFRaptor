@@ -1,0 +1,6 @@
+[submodule "SoapyHackRF"]
+	path = SoapyHackRF
+	url = https://github.com/Iwancof/SoapyHackRF.git
+[submodule "soapy-utils"]
+	path = soapy-utils
+	url = https://github.com/Iwancof/soapy-utils.git

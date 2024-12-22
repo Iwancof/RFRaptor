@@ -12,6 +12,8 @@ mod fsk;
 mod liquid;
 mod sdr;
 
+use std::{collections::HashMap, ffi::CString};
+
 use burst::Burst;
 use fsk::FskDemod;
 use sdr::SDRConfig;
@@ -33,11 +35,11 @@ static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SD
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
-    std::env::set_var(
-        "SOAPY_SDR_PLUGIN_PATH",
-        // "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
-        "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-file/build",
-    );
+    // std::env::set_var(
+    //     "SOAPY_SDR_PLUGIN_PATH",
+    //     // "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
+    //     "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-file/build",
+    // );
 
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
@@ -50,8 +52,8 @@ fn main() -> anyhow::Result<()> {
     unsafe { fftwf_make_planner_thread_safe() }
 
     // let filter = "virtual";
-    // let filter = "hackrf";
-    let filter = "file";
+    let filter = "hackrf";
+    // let filter = "file";
     log::trace!("filter is {}", filter);
 
     let mut devarg = soapysdr::enumerate(filter)
@@ -86,7 +88,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS);
 
-    let mut read_stream = dev.rx_stream::<Complex<f32>>(&[config.channels])?;
+    let mut read_stream =
+        dev.rx_stream_args::<Complex<f32>, _>(&[config.channels], "buffers=65535")?;
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
@@ -138,6 +141,11 @@ fn main() -> anyhow::Result<()> {
     '_outer: for _ in 0.. {
         let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         // assert_eq!(read, buffer.len());
+
+        let remain_count = dev.channel_info(soapysdr::Direction::Rx, 0)?.get("buffer_count").expect("are you using original SoapyHackRF?").parse::<usize>()?;
+        if 1000 < remain_count {
+            log::warn!("processing too slow: {}", remain_count);
+        }
 
         for fft in fft_result.iter_mut() {
             fft.clear();
