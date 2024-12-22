@@ -1,0 +1,16 @@
+[package]
+name = "liquid-dsp-sys"
+version = "0.1.0"
+edition = "2024"
+
+build = "build.rs"
+
+[dependencies]
+num-complex = { version = "0.4.6", optional = true }
+
+[build-dependencies]
+bindgen = "0.71.1"
+
+[features]
+default = []
+num_complex = ["num-complex"]
