@@ -342,12 +342,4 @@ mod tests {
 
         assert_eq!(packet, demodulated.bits);
     }
-
-    /*
-    #[should_panic]
-    #[test]
-    fn do_liquid_test() {
-        // let _invalid_config = FskMod::new_with_band(20e6, 20, 0.50);
-    }
-    */
 }
