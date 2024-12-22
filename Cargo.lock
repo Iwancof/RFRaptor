@@ -116,12 +116,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
-name = "az"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
-
-[[package]]
 name = "backtrace"
 version = "0.3.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -194,15 +188,6 @@ dependencies = [
  "rustc-hash 2.1.0",
  "shlex",
  "syn 2.0.76",
-]
-
-[[package]]
-name = "biquad"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "820524f5e3e3add696ddf69f79575772e152c0e78e9f0370b56990a7e808ec3e"
-dependencies = [
- "libm",
 ]
 
 [[package]]
@@ -341,9 +326,9 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
 name = "cmake"
-version = "0.1.51"
+version = "0.1.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb1e43aa7fd152b1f968787f7dbcdeb306d1867ff373c69955211876c053f91a"
+checksum = "c682c223677e0e5b6b7f63a64b9351844c3f1b1678a68b7ee617e30fb082620e"
 dependencies = [
  "cc",
 ]
@@ -533,11 +518,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "approx",
- "az",
- "biquad",
  "cc",
  "chrono",
  "clap",
+ "cmake",
  "env_logger",
  "libbtbb-sys",
  "liquid-dsp-sys",
@@ -547,7 +531,6 @@ dependencies = [
  "num-complex",
  "num-derive",
  "num-traits",
- "pretty-hex",
  "rand",
  "regex",
  "rustfft",
@@ -560,7 +543,7 @@ dependencies = [
  "tungstenite",
  "useful_number",
  "wrcap",
- "zerocopy 0.8.9",
+ "zerocopy 0.8.13",
 ]
 
 [[package]]
@@ -657,12 +640,6 @@ dependencies = [
  "cfg-if",
  "windows-targets",
 ]
-
-[[package]]
-name = "libm"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
 
 [[package]]
 name = "liquid-dsp-sys"
@@ -833,12 +810,6 @@ checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
  "zerocopy 0.7.35",
 ]
-
-[[package]]
-name = "pretty-hex"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbc83ee4a840062f368f9096d80077a9841ec117e17e7f700df81958f1451254"
 
 [[package]]
 name = "prettyplease"
@@ -1388,11 +1359,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.9"
+version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49e690f8f352f4a9ee8679a8c5921f42ffd0d6d6413a0a66b8e81cf524e109c"
+checksum = "67914ab451f3bfd2e69e5e9d2ef3858484e7074d63f204fd166ec391b54de21d"
 dependencies = [
- "zerocopy-derive 0.8.9",
+ "zerocopy-derive 0.8.13",
 ]
 
 [[package]]
@@ -1408,9 +1379,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.9"
+version = "0.8.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa732fcc881df7a6fbe8e3ed17baadece53b379ad58fe2633396b1a2b108a7b1"
+checksum = "7988d73a4303ca289df03316bc490e934accf371af6bc745393cf3c2c5c4f25d"
 dependencies = [
  "proc-macro2",
  "quote",
