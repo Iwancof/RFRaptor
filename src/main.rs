@@ -70,26 +70,19 @@ enum Command {
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
-    // std::env::set_var(
-    //     "SOAPY_SDR_PLUGIN_PATH",
-    //     // "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-virtual/build",
-    //     "/home/iwancof/Nextcloud/SecHack365/HackRF/soapy-file/build",
-    // );
-
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     soapysdr::configure_logging();
 
     let args = Args::parse();
 
     let (filter, join_path) = match args.device.as_str() {
-        "hackrf" => ("hackrf", "SoapyHackRF/build"),
-        "virtual" => ("virtual", "soapy-utils/soapy-virtual/build"),
-        "file" => ("file", "soapy-utils/soapy-file/build"),
+        "hackrf" => ("hackrf", "SoapyHackRF"),
+        "virtual" => ("virtual", "soapy-utils/soapy-virtual"),
+        "file" => ("file", "soapy-utils/soapy-file"),
         _ => unreachable!(),
     };
 
-    let plugin_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(join_path);
-
+    let plugin_path = std::path::Path::new(env!("OUT_DIR")).join(join_path);
     std::env::set_var("SOAPY_SDR_PLUGIN_PATH", &plugin_path);
 
     log::trace!("filter: {}, plugin_path: {}", filter, plugin_path.display());
@@ -132,7 +125,7 @@ fn main() -> anyhow::Result<()> {
     SDR_CONFIG.lock().unwrap().replace(config.clone());
 
     log::info!("config = {}", config);
-    // config.set(&dev)?;
+    config.set(&dev)?;
 
     let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS);
 
