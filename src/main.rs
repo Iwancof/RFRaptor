@@ -69,9 +69,6 @@ fn main() -> anyhow::Result<()> {
     // let center_freq = 2401;
     let center_freq = 2427;
 
-    let m = 4;
-    let lp_cutoff = 0.75;
-
     let config = SDRConfig {
         channels: 0,
         num_channels: NUM_CHANNELS,
@@ -87,15 +84,14 @@ fn main() -> anyhow::Result<()> {
     log::info!("config = {}", config);
     // config.set(&dev)?;
 
-    let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS, m, lp_cutoff);
+    let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS);
 
-    let mut read_stream = dev.rx_stream::<Complex<i8>>(&[config.channels])?;
+    let mut read_stream = dev.rx_stream::<Complex<f32>>(&[config.channels])?;
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     // fixed size buffer
-    let mut buffer = vec![Complex::<i8>::new(0, 0); read_stream.mtu()?].into_boxed_slice();
-    println!("mtu: {}", read_stream.mtu()?);
+    let mut buffer = vec![Complex::<f32>::new(0., 0.); read_stream.mtu()?].into_boxed_slice();
 
     // let mut is_buffer_valid = [false; 96];
     let mut sdridx_to_sender = vec![];
@@ -148,7 +144,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         for chunk in buffer.chunks_exact_mut(NUM_CHANNELS / 2) {
-            for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
+            for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
                 if sdridx_to_sender[sdridx].is_some() {
                     // fft_result[sdridx].push(*fft / (NUM_CHANNELS) as f32);
                     fft_result[sdridx].push(*fft);
