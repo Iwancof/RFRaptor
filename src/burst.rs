@@ -6,7 +6,7 @@ use num_complex::Complex;
 use crate::liquid::{liquid_do_int, liquid_get_pointer};
 
 #[derive(Debug)]
-struct Agc {
+pub struct Agc {
     crcf_s: std::ptr::NonNull<liquid_dsp_sys::agc_crcf_s>,
 }
 
@@ -60,7 +60,7 @@ impl Drop for Agc {
 
 #[derive(Debug)]
 pub struct Burst {
-    crcf: Agc,
+    pub crcf: Agc,
     in_burst: bool,
     burst: Vec<Complex<f32>>,
 }
