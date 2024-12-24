@@ -1,3 +1,6 @@
+#![feature(test)]
+#![feature(portable_simd)]
+
 pub mod bitops;
 pub mod bluetooth;
 pub mod burst;

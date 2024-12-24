@@ -1,0 +1,6 @@
+devices:
+- !File
+  direction: Rx
+  path: ./sample.txt
+- !Virtual
+  direction: Tx

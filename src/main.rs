@@ -58,15 +58,15 @@ fn main() -> anyhow::Result<()> {
 
     let read_config = SDR_RX_CONFIGS.lock().unwrap()[&0].clone();
 
-    let mut channelizer = channelizer::Channelizer::new(read_config.num_channels);
+    let mut channelizer = channelizer::Channelizer::new(read_config.num_channels, 4, 0.75);
 
     let mut read_stream =
-        read_dev.rx_stream_args::<Complex<f32>, _>(&[read_config.channels], "buffers=65535")?;
+        read_dev.rx_stream_args::<Complex<i8>, _>(&[read_config.channels], "buffers=65535")?;
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     // fixed size buffer
-    let mut buffer = vec![Complex::<f32>::new(0., 0.); read_stream.mtu()?].into_boxed_slice();
+    let mut buffer = vec![Complex::new(0, 0); read_stream.mtu()?].into_boxed_slice();
 
     // let mut is_buffer_valid = [false; 96];
     let mut sdridx_to_sender = vec![];
@@ -109,12 +109,15 @@ fn main() -> anyhow::Result<()> {
     // set thread priority
     // set_current_thread_priority(ThreadPriority::Max).unwrap();
 
+    println!("read_config: {}", read_config);
+
     read_stream.activate(None)?;
     '_outer: for _ in 0.. {
         let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+        // println!("read: {}", _read);
+        // println!("{:?}", &buffer[_read-3..]);
         // assert_eq!(read, buffer.len());
 
-        /*
         if let Some(remain_count) = read_dev
             .channel_info(soapysdr::Direction::Rx, 0)?
             .get("buffer_count")
@@ -126,14 +129,13 @@ fn main() -> anyhow::Result<()> {
             //     log::warn!("processing too slow: {}", remain_count);
             // }
         }
-        */
 
         for fft in fft_result.iter_mut() {
             fft.clear();
         }
 
         for chunk in buffer.chunks_exact_mut(read_config.num_channels / 2) {
-            for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
+            for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
                 if sdridx_to_sender[sdridx].is_some() {
                     fft_result[sdridx].push(*fft);
                 }
