@@ -8,32 +8,25 @@ mod bitops;
 mod bluetooth;
 mod burst;
 mod channelizer;
+mod device;
 mod fsk;
 mod liquid;
-mod sdr;
-
-use std::{collections::HashMap, ffi::CString};
 
 use burst::Burst;
 use fsk::FskDemod;
-use sdr::SDRConfig;
 
-use anyhow::Context;
 use num_complex::Complex;
 use tungstenite::accept;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[allow(unused_imports)] // use with permission
 use thread_priority::{set_current_thread_priority, ThreadPriority};
 
-const NUM_CHANNELS: usize = 20usize;
-
 type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
 
-// Config at runtime
-static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SDRConfig>>>> =
-    const { std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::Mutex::new(None))) };
+use device::sdr::SDRConfig;
+use device::{SDR_RX_CONFIGS, SDR_TX_CONFIGS};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -41,96 +34,34 @@ static SDR_CONFIG: std::sync::LazyLock<std::sync::Arc<std::sync::Mutex<Option<SD
     version = format!("{}-{}", env!("CARGO_PKG_VERSION"), env!("GIT_HASH")),
     about = "Welcome to hydro-strike CLI Tool",
 )]
-
-struct Args {
-    /// The type of operation to perform
-    #[arg(short, long, value_parser = ["hackrf", "virtual", "file"])]
-    device: String,
-
-    /// Additional options based on the type
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Options for hackrf type
-    Hackrf {
-        /// Frequency to use (default: 2427)
-        #[arg(short, long, default_value_t = 2427)]
-        freq: isize,
-    },
-    /// Options for file type
-    File {
-        /// Path to the file
-        #[arg(short, long)]
-        path: String,
-    },
+pub(crate) struct Args {
+    #[arg(short, long)]
+    path: String,
 }
 
 #[log_derive::logfn(ok = "TRACE", err = "ERROR")]
 fn main() -> anyhow::Result<()> {
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     soapysdr::configure_logging();
 
     let args = Args::parse();
 
-    let (filter, join_path) = match args.device.as_str() {
-        "hackrf" => ("hackrf", "SoapyHackRF"),
-        "virtual" => ("virtual", "soapy-utils/soapy-virtual"),
-        "file" => ("file", "soapy-utils/soapy-file"),
-        _ => unreachable!(),
-    };
+    let (rx, tx) = device::open_device(args.path)?;
+    println!("rx.len() = {}, tx.len() = {}", rx.len(), tx.len());
 
-    let plugin_path = std::path::Path::new(env!("OUT_DIR")).join(join_path);
-    std::env::set_var("SOAPY_SDR_PLUGIN_PATH", &plugin_path);
+    println!("configs: {:?}", SDR_RX_CONFIGS.lock().unwrap());
+    println!("configs: {:?}", SDR_TX_CONFIGS.lock().unwrap());
 
-    log::trace!("filter: {}, plugin_path: {}", filter, plugin_path.display());
+    // NOTE: use first device for testing
+    let read_dev = rx[0].clone();
+    let write_dev = tx[0].clone();
 
-    let mut devarg = soapysdr::enumerate(filter)
-        .context("failed to enumerate devices")?
-        .into_iter()
-        .next()
-        .context("No devices found")?;
+    let read_config = SDR_RX_CONFIGS.lock().unwrap()[&0].clone();
 
-    log::trace!("found device {}", devarg);
-
-    if args.device == "file" {
-        if let Some(Command::File { ref path }) = args.command {
-            devarg.set("path", path.clone());
-        } else {
-            panic!("file type requires path");
-        }
-    }
-
-    let dev = soapysdr::Device::new(devarg)?;
-
-    let center_freq = match args.command {
-        Some(Command::Hackrf { ref freq }) => *freq,
-        _ => 2427,
-    };
-
-    let use_hackrf = args.device == "hackrf";
-
-    log::trace!("center_freq: {}", center_freq);
-
-    let config = SDRConfig {
-        channels: 0,
-        num_channels: NUM_CHANNELS,
-        center_freq: center_freq as f64 * 1.0e6,
-        sample_rate: NUM_CHANNELS as f64 * 1.0e6,
-        bandwidth: NUM_CHANNELS as f64 * 1.0e6,
-        gain: 64.,
-    };
-    SDR_CONFIG.lock().unwrap().replace(config.clone());
-
-    log::info!("config = {}", config);
-    config.set(&dev)?;
-
-    let mut channelizer = channelizer::Channelizer::new(NUM_CHANNELS);
+    let mut channelizer = channelizer::Channelizer::new(read_config.num_channels);
 
     let mut read_stream =
-        dev.rx_stream_args::<Complex<f32>, _>(&[config.channels], "buffers=65535")?;
+        read_dev.rx_stream_args::<Complex<f32>, _>(&[read_config.channels], "buffers=65535")?;
 
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
@@ -141,23 +72,23 @@ fn main() -> anyhow::Result<()> {
     let mut sdridx_to_sender = vec![];
     let mut blch_to_receiver = vec![];
 
-    for _ in 0..NUM_CHANNELS {
+    for _ in 0..read_config.num_channels {
         sdridx_to_sender.push(None);
     }
     for _ in 0..96 {
         blch_to_receiver.push(None);
     }
 
-    for (sdr_idx, (tx, rx)) in (0..NUM_CHANNELS)
+    for (sdr_idx, (tx, rx)) in (0..read_config.num_channels)
         .map(|_| std::sync::mpsc::channel::<Vec<Complex<f32>>>())
         .enumerate()
     {
         let sdr_idx_isize = sdr_idx as isize;
-        let freq = center_freq
-            + if sdr_idx_isize < (NUM_CHANNELS as isize / 2) {
+        let freq = read_config.freq_mhz as isize
+            + if sdr_idx_isize < (read_config.num_channels as isize / 2) {
                 sdr_idx_isize
             } else {
-                sdr_idx_isize - NUM_CHANNELS as isize
+                sdr_idx_isize - read_config.num_channels as isize
             };
 
         if freq & 1 == 0 && (2402..=2480).contains(&freq) {
@@ -168,11 +99,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    create_catcher_threads(blch_to_receiver);
+    create_catcher_threads(blch_to_receiver, read_config.clone());
     start_websocket()?;
 
-    let mut fft_result: Vec<Vec<Complex<f32>>> = (0..NUM_CHANNELS)
-        .map(|_| Vec::with_capacity(131072 / (NUM_CHANNELS / 2)))
+    let mut fft_result: Vec<Vec<Complex<f32>>> = (0..read_config.num_channels)
+        .map(|_| Vec::with_capacity(131072 / (read_config.num_channels / 2)))
         .collect::<Vec<_>>();
 
     // set thread priority
@@ -183,31 +114,33 @@ fn main() -> anyhow::Result<()> {
         let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
         // assert_eq!(read, buffer.len());
 
-        if use_hackrf {
-            let remain_count = dev
-                .channel_info(soapysdr::Direction::Rx, 0)?
-                .get("buffer_count")
-                .expect("are you using original SoapyHackRF?")
-                .parse::<usize>()?;
-            if 1000 < remain_count {
-                log::warn!("processing too slow: {}", remain_count);
-            }
+        /*
+        if let Some(remain_count) = read_dev
+            .channel_info(soapysdr::Direction::Rx, 0)?
+            .get("buffer_count")
+        {
+            let remain_count = remain_count.parse::<usize>()?;
+            log::trace!("remain_count: {}", remain_count);
+
+            // if 1000 < remain_count {
+            //     log::warn!("processing too slow: {}", remain_count);
+            // }
         }
+        */
 
         for fft in fft_result.iter_mut() {
             fft.clear();
         }
 
-        for chunk in buffer.chunks_exact_mut(NUM_CHANNELS / 2) {
+        for chunk in buffer.chunks_exact_mut(read_config.num_channels / 2) {
             for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
                 if sdridx_to_sender[sdridx].is_some() {
-                    // fft_result[sdridx].push(*fft / (NUM_CHANNELS) as f32);
                     fft_result[sdridx].push(*fft);
                 }
             }
         }
 
-        for ch_idx in 0..NUM_CHANNELS {
+        for ch_idx in 0..read_config.num_channels {
             if let Some((_blch, tx)) = &sdridx_to_sender[ch_idx] {
                 tx.send(fft_result[ch_idx].clone())?;
             }
@@ -223,9 +156,9 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
-    let sample_rate = SDR_CONFIG.lock().unwrap().as_ref().unwrap().sample_rate as f32;
-    let num_channels = SDR_CONFIG.lock().unwrap().as_ref().unwrap().num_channels;
+fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) {
+    let sample_rate = config.sample_rate;
+    let num_channels = config.num_channels;
 
     for (ble_ch_idx, sdr_idx_rx) in rxs
         .into_iter()
@@ -237,7 +170,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>) {
         let (_sdr_idx, rx) = sdr_idx_rx.unwrap();
         std::thread::spawn(move || {
             let mut burst = Burst::new();
-            let mut fsk = FskDemod::new(sample_rate, num_channels);
+            let mut fsk = FskDemod::new(sample_rate as _, num_channels);
 
             #[derive(Debug)]
             enum ErrorKind {
@@ -336,7 +269,7 @@ fn start_websocket() -> anyhow::Result<()> {
 
                     if let Some(bt) = bt {
                         #[allow(non_snake_case)]
-                        #[derive(serde_derive::Serialize)]
+                        #[derive(serde::Serialize)]
                         struct Message {
                             mac: String,
                             packetInfo: String,

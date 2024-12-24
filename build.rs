@@ -19,6 +19,8 @@ fn main() {
         let project_dir = format!("{}/{}", manifest_dir, project);
         let build_dir = format!("{}/{}", dest_dir, project);
 
+        println!("cargo:rerun-if-changed={}", project_dir);
+
         let status = Command::new("cmake")
             .args(&["-S", &project_dir, "-B", &build_dir])
             .status()

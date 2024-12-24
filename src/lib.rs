@@ -4,4 +4,4 @@ pub mod burst;
 pub mod channelizer;
 pub mod fsk;
 pub mod liquid;
-pub mod sdr;
+pub mod device;

@@ -1,0 +1,11 @@
+devices:
+- !HackRF
+  direction: Rx
+  freq_mhz: 2427
+  serial: 0000000000000000f77c60dc259132c3
+  # - !HackRF
+  #   direction: Tx
+  #   freq: 2727000000
+  #   serial: 0000000000000000436c63dc38276e63
+- !Virtual
+  direction: Tx

@@ -8,8 +8,11 @@ pub struct SDRConfig {
     /// Number of channels to view
     pub num_channels: usize,
 
-    /// Center frequency of the SDR
+    /// Center frequency of the SDR [Hz]
     pub center_freq: f64,
+
+    #[doc(hidden)]
+    pub freq_mhz: usize,
 
     /// Sample rate of the SDR
     pub sample_rate: f64,
