@@ -278,8 +278,8 @@ impl SlidingWindow {
 
         let write_pos = self.current_pos + self.len - 1; // TODO: remove overflow check
        
-        self.r[write_pos] = re as i32;
-        self.i[write_pos] = im as i32;
+        // self.r[write_pos] = re as i32;
+        // self.i[write_pos] = im as i32;
 
         unsafe {
             // remove overflow check
