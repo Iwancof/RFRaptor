@@ -36,7 +36,7 @@ impl Channelizer {
     /// low-pass cutoff frequency.
     /// This uses a Kaiser window to generate the filter taps internally.
     pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
-        let fft = rustfft::FftPlanner::new().plan_fft_forward(num_channels);
+        let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
         let windows = (0..num_channels)
             .map(|_| SlidingWindow::new(2 * m))
             .collect::<Vec<_>>();
