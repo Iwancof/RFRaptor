@@ -2,6 +2,10 @@ use az::WrappingAs;
 
 use num_complex::Complex;
 
+use crate::liquid::{liquid_do_int, liquid_get_pointer};
+
+const SYMBOL_DELAY: u32 = 4;
+
 /// Channelizer
 pub struct Channelizer {
     /// number of channels
@@ -195,6 +199,7 @@ impl Channelizer {
 
     /// Channelize the input data.
     /// The input data must be exactly half the number of channels.
+    /// Length of the output data is the same as the number of channels.
     pub fn channelize(&mut self, input: &[Complex<i8>]) -> &mut Vec<Complex<f32>> {
         debug_assert_eq!(input.len(), self.channel_half);
 
@@ -340,7 +345,7 @@ impl SlidingWindow {
             );
         }
 
-        Complex::new(out[0] >> 8, out[1] >> 8) // due to sdr's signal format
+        Complex::new((out[0] >> 8) as _, (out[1] >> 8) as _) // due to sdr's signal format
     }
 
     pub(crate) fn apply_filter_float(&self, filter: &[i32]) -> Complex<f32> {
@@ -367,6 +372,124 @@ impl SlidingWindow {
     }
 }
 
+/*
+/// Synthesizer
+pub struct Synthesizer {
+    /// number of channels
+    pub num_channels: usize,
+
+    /// filter bank
+    filter_bank: FilterBank,
+
+    /// window
+    window_0: Vec<SlidingWindow>,
+    window_1: Vec<SlidingWindow>,
+
+    /// fft
+    fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
+
+    #[doc(hidden)]
+    channel_half: usize, // num_channels / 2
+
+    #[cfg(feature = "channel_power_2")]
+    #[doc(hidden)]
+    channel_minus_1: usize,
+
+    #[doc(hidden)]
+    flag: bool,
+
+    #[doc(hidden)]
+    float_work_buffer: Vec<Complex<f32>>,
+
+    #[doc(hidden)]
+    int_work_buffer: Vec<Complex<i8>>,
+}
+
+impl Synthesizer {
+    pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
+        if cfg!(feature = "channel_power_2") {
+            assert!(num_channels.is_power_of_two());
+        }
+
+        let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
+        let window_0 = (0..num_channels)
+            .map(|_| SlidingWindow::new(2 * m))
+            .collect::<Vec<_>>();
+        let window_1 = (0..num_channels)
+            .map(|_| SlidingWindow::new(2 * m))
+            .collect::<Vec<_>>();
+
+        Self {
+            num_channels,
+
+            #[cfg(feature = "channel_power_2")]
+            channel_minus_1: num_channels - 1,
+
+            channel_half: num_channels / 2,
+
+            filter_bank: FilterBank::from_filter(
+                &generate_kaiser(num_channels, m, lp_cutoff),
+                num_channels,
+                m,
+            ),
+
+            window_0,
+            window_1,
+            flag: false,
+            fft,
+
+            float_work_buffer: Vec::with_capacity(num_channels),
+
+            int_work_buffer: Vec::with_capacity(num_channels / 2),
+        }
+    }
+
+    pub fn ifft_synthesizer(&mut self, input: &[Complex<f32>]) -> &mut Vec<Complex<i8>> {
+        debug_assert_eq!(input.len(), self.num_channels);
+
+        input.clone_into(&mut self.float_work_buffer);
+        self.fft.process(&mut self.float_work_buffer);
+
+        // scale it
+        for x in self.float_work_buffer.iter_mut() {
+            x.re *= 1. / 2.;
+            x.im *= 1. / 2.;
+        }
+
+        let dest_window = if self.flag {
+            &mut self.window_0
+        } else {
+            &mut self.window_1
+        };
+
+        for (i, d) in self.float_work_buffer.iter().enumerate() {
+            dest_window[i].push(Complex::new((d.re * 32768.0) as i8, (d.im * 32768.0) as i8));
+        }
+
+        self.int_work_buffer.clear();
+        if self.flag {
+            for start_pos in 0..self.channel_half {
+                let a =
+                    self.window_0[start_pos].apply_filter(&self.filter_bank.subfilters[start_pos]);
+                let b = self.window_1[start_pos]
+                    .apply_filter(&self.filter_bank.subfilters[start_pos + self.channel_half]);
+                self.int_work_buffer.push(a + b);
+            }
+        } else {
+            for start_pos in 0..self.channel_half {
+                let a = self.window_0[start_pos]
+                    .apply_filter(&self.filter_bank.subfilters[start_pos + self.channel_half]);
+                let b =
+                    self.window_1[start_pos].apply_filter(&self.filter_bank.subfilters[start_pos]);
+                self.int_work_buffer.push(a + b);
+            }
+        }
+
+        &mut self.int_work_buffer
+    }
+}
+*/
+
 fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
     let h_len = 2 * channel * m + 1;
     let mut buffer = Vec::with_capacity(h_len);
@@ -386,16 +509,61 @@ fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
     buffer
 }
 
-pub struct Synthesizer {}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use approx::relative_eq;
     use num_traits::WrappingAdd;
-    use rand::{Rng, SeedableRng};
+    use rand::{rngs::SmallRng, Rng, SeedableRng};
 
     use std::simd::*;
+
+    // #[test]
+    // fn uptest_random_data() {
+    //     let num_channels = 16;
+    //     let samples = num_channels * 100;
+
+    //     let mut channelizer = Channelizer::new(num_channels, 4, 1. / 16.);
+    //     let mut synthesizer = Synthesizer::new(num_channels, 4, 0.5 / 16.);
+
+    //     // println!("{:?}", channelizer);
+    //     // println!("{:?}", synthesizer);
+
+    //     let seed = 0;
+    //     let mut rng = SmallRng::seed_from_u64(seed);
+
+    //     let data = (0..samples)
+    //         .map(|_| Complex::new(rng.gen_range(-5..5), rng.gen_range(-5..5)))
+    //         .collect::<Vec<_>>();
+    //     let mut synthesized = vec![];
+
+    //     for chunk in data.chunks(num_channels / 2) {
+    //         let channelized = channelizer.channelize_fft(chunk);
+    //         let syn = synthesizer.ifft_synthesizer(channelized);
+
+    //         synthesized.extend_from_slice(syn);
+    //     }
+
+    //     // for s in synthesized.iter() {
+    //     //     println!("{:?}", s);
+    //     // }
+
+    //     let delay = 2 * num_channels * SYMBOL_DELAY as usize - num_channels / 2 + 1;
+
+    //     // let mut rmes = 0.0;
+    //     for i in 0..samples {
+    //         let compare = if i < delay {
+    //             Complex::new(0, 0)
+    //         } else {
+    //             data[i - delay]
+    //         };
+
+    //         println!("{}: {:?} == {:?}", i, synthesized[i], compare);
+    //         // rmes += (synthesized[i] - compare).norm_sqr();
+    //     }
+
+    //     panic!();
+    // }
 
     include!("./def_test_data/channelizer.rs");
 
