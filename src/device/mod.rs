@@ -207,7 +207,24 @@ fn open_file(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> an
             ret.0.push(dev);
             SDR_RX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
         }
-        _ => return Err(anyhow::anyhow!("Invalid direction (Rx)")),
+        "Tx" => {
+            let idx = ret.1.len();
+            ret.1.push(dev);
+            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
+        }
+        "RxTx" => {
+            let idx = ret.0.len();
+            ret.0.push(dev.clone());
+            SDR_RX_CONFIGS
+                .lock()
+                .unwrap()
+                .insert(idx, sdr_config.clone());
+
+            let idx = ret.1.len();
+            ret.1.push(dev);
+            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
+        }
+        _ => return Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
     };
 
     Ok(())

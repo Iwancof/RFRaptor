@@ -2,5 +2,6 @@ devices:
 - !File
   direction: Rx
   path: ./sample.txt
-- !Virtual
+- !File
   direction: Tx
+  path: ./tx_out.txt

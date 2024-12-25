@@ -63,6 +63,13 @@ fn main() -> anyhow::Result<()> {
     let mut read_stream =
         read_dev.rx_stream_args::<Complex<i8>, _>(&[read_config.channels], "buffers=65535")?;
 
+    let mut write_stream =
+        write_dev.tx_stream_args::<Complex<i8>, _>(&[read_config.channels], "")?;
+
+    write_stream.activate(None)?;
+    write_stream.write(&[&[Complex::new(0, 0); 1024]], None, true, 1_000_000)?;
+    write_stream.deactivate(None)?;
+
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
 
     // fixed size buffer
