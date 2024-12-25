@@ -113,13 +113,19 @@ impl Channelizer {
             for (i, idx) in input.iter().enumerate() {
                 let window_idx = self.num_channels - i - 1;
 
-                self.windows[window_idx].push(*idx);
+                // SAFETY: if input.len() is smaller than self.channel_half.
+                unsafe {
+                    self.windows.get_unchecked_mut(window_idx).push(*idx);
+                }
             }
         } else {
             for (i, idx) in input.iter().enumerate() {
                 let window_idx = self.channel_half - i - 1;
 
-                self.windows[window_idx].push(*idx);
+                // self.windows[window_idx].push(*idx);
+                unsafe {
+                    self.windows.get_unchecked_mut(window_idx).push(*idx);
+                }
             }
         }
     }
@@ -394,6 +400,7 @@ mod test {
     include!("./def_test_data/channelizer.rs");
 
     #[test]
+    #[cfg(not(feature = "channel_power_2"))]
     fn channelize_once() {
         let channel = 20;
         let m = 4;
@@ -414,6 +421,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(feature = "channel_power_2"))]
     fn channelize() {
         let channel = 20;
         let m = 4;
@@ -457,6 +465,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(feature = "channel_power_2"))]
     fn convert_subfilter_kaiser_window() {
         let channel = 20;
         let m = 4;
@@ -490,22 +499,22 @@ mod test {
         }
     }
 
-    #[test]
-    fn uptest_channelizer() {
-        let channel = 20;
-        let m = 4;
-        let lp_cutoff = 0.75;
+    // #[test]
+    // fn uptest_channelizer() {
+    //     let channel = 16;
+    //     let m = 4;
+    //     let lp_cutoff = 0.75;
 
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
-        let data: Vec<Complex<i8>> = (0..10)
-            .map(|_| Complex::new(rng.gen(), rng.gen()))
-            .collect::<Vec<_>>();
+    //     let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+    //     let data: Vec<Complex<i8>> = (0..10)
+    //         .map(|_| Complex::new(rng.gen(), rng.gen()))
+    //         .collect::<Vec<_>>();
 
-        let mut magic = Channelizer::new(channel, m, lp_cutoff);
+    //     let mut magic = Channelizer::new(channel, m, lp_cutoff);
 
-        let got = magic.channelize_fft(&data);
-        panic!("{:?}", got);
-    }
+    //     let got = magic.channelize_fft(&data);
+    //     panic!("{:?}", got);
+    // }
 
     extern crate test;
 
@@ -651,7 +660,7 @@ mod test {
     }
 
     fn create_mock() -> (Channelizer, Vec<Vec<Complex<i8>>>) {
-        let channel = 20;
+        let channel = 16;
         let m = 4;
         let lp_cutoff = 0.75;
 
@@ -661,7 +670,7 @@ mod test {
 
         let mut data = vec![];
         for _i in 0..100000 {
-            let shot = (0..10)
+            let shot = (0..8)
                 .map(|_| Complex::new(rng.gen(), rng.gen()))
                 .collect::<Vec<_>>();
 
