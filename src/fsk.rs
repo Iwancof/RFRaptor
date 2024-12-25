@@ -342,4 +342,78 @@ mod tests {
 
         assert_eq!(packet, demodulated.bits);
     }
+
+    #[test]
+    fn compatible_data_test() {
+        use std::io::BufRead;
+
+        let file = std::fs::File::open("./fsk_debug.txt").expect("file open failed");
+        let reader = std::io::BufReader::new(file);
+        let mut lines = reader.lines();
+
+        let mut data: Vec<(Vec<num_complex::Complex32>, Option<Vec<u8>>)> = Vec::new();
+
+        while let Some(line) = lines.next() {
+            let raw_len: usize = line.unwrap().trim().parse().unwrap();
+
+            let mut raw_data = Vec::new();
+            for _ in 0..raw_len {
+                let line = lines.next().unwrap().unwrap();
+                let mut parts = line.split_whitespace();
+
+                let real: f32 = parts.next().unwrap().parse().unwrap();
+                let imag: f32 = parts.next().unwrap().parse().unwrap();
+
+                raw_data.push(num_complex::Complex32::new(real, imag));
+            }
+
+            let bits_len: usize = lines.next().unwrap().unwrap().trim().parse().unwrap();
+            let bits = if bits_len == 0 {
+                None
+            } else {
+                let mut bits = Vec::new();
+                for _ in 0..bits_len {
+                    let line = lines.next().unwrap().unwrap();
+                    let bit: u8 = line.trim().parse().unwrap();
+                    bits.push(bit);
+                }
+
+                Some(bits)
+            };
+
+            data.push((raw_data, bits));
+        }
+
+        println!("loaded {:?}", data.len());
+
+        let mut fsk = FskDemod::new(20e6, 20);
+
+        for d in data.iter() {
+            let demod = fsk.demodulate(&d.0);
+
+            match demod {
+                Ok(Packet {
+                    bits,
+                    demod: _,
+                    cfo: _,
+                    deviation: _,
+                }) => {
+                    let expect_bits = d.1.as_ref().unwrap();
+
+                    for (a, b) in bits.iter().zip(expect_bits.iter()) {
+                        assert_eq!(a, b);
+                    }
+
+                    // if let Ok(p) = crate::bitops::bits_to_packet(&bits, 2427) {
+                    //     println!("{:x?}", p);
+                    // }
+                }
+                Err(e) => {
+                    if d.1.is_some() {
+                        panic!("{:?}", e);
+                    }
+                }
+            }
+        }
+    }
 }
