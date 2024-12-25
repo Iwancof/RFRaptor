@@ -18,6 +18,10 @@ pub struct Channelizer {
 
     #[doc(hidden)]
     channel_half: usize, // num_channels / 2
+    //
+    #[cfg(feature = "channel_power_2")]
+    #[doc(hidden)]
+    channel_minus_1: usize,
 
     #[doc(hidden)]
     flag: bool,
@@ -36,6 +40,10 @@ impl Channelizer {
     /// low-pass cutoff frequency.
     /// This uses a Kaiser window to generate the filter taps internally.
     pub fn new(num_channels: usize, m: usize, lp_cutoff: f32) -> Self {
+        if cfg!(feature = "channel_power_2") {
+            assert!(num_channels.is_power_of_two());
+        }
+
         let fft = rustfft::FftPlanner::new().plan_fft_inverse(num_channels);
         let windows = (0..num_channels)
             .map(|_| SlidingWindow::new(2 * m))
@@ -43,6 +51,10 @@ impl Channelizer {
 
         Self {
             num_channels,
+
+            #[cfg(feature = "channel_power_2")]
+            channel_minus_1: num_channels - 1,
+
             channel_half: num_channels / 2,
 
             filter_bank: FilterBank::from_filter(
@@ -118,7 +130,11 @@ impl Channelizer {
 
         self.int_work_buffer.clear();
         for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            #[cfg(feature = "channel_power_2")]
+            let current_pos = (offset + ch_idx) & self.channel_minus_1;
+            #[cfg(not(feature = "channel_power_2"))]
             let current_pos = (offset + ch_idx) % self.num_channels;
+
             let sf = &self.filter_bank.subfilters[current_pos];
 
             self.int_work_buffer.push(window.apply_filter(sf)); // apply kaiser window
@@ -139,7 +155,11 @@ impl Channelizer {
 
         self.float_work_buffer.clear();
         for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            #[cfg(feature = "channel_power_2")]
+            let current_pos = (offset + ch_idx) & self.channel_minus_1;
+            #[cfg(not(feature = "channel_power_2"))]
             let current_pos = (offset + ch_idx) % self.num_channels;
+
             let sf = &self.filter_bank.subfilters[current_pos];
 
             let Complex { re, im } = window.apply_filter(sf);
@@ -156,7 +176,11 @@ impl Channelizer {
 
         self.float_work_buffer.clear();
         for (ch_idx, window) in self.windows.iter_mut().enumerate() {
+            #[cfg(feature = "channel_power_2")]
+            let current_pos = (offset + ch_idx) & self.channel_minus_1;
+            #[cfg(not(feature = "channel_power_2"))]
             let current_pos = (offset + ch_idx) % self.num_channels;
+
             let sf = &self.filter_bank.subfilters[current_pos];
 
             self.float_work_buffer.push(window.apply_filter_float(sf)); // apply kaiser window
@@ -277,7 +301,7 @@ impl SlidingWindow {
         }
 
         let write_pos = self.current_pos + self.len - 1; // TODO: remove overflow check
-       
+
         // self.r[write_pos] = re as i32;
         // self.i[write_pos] = im as i32;
 

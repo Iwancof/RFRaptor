@@ -6,7 +6,7 @@ edition = "2021"
 default-run = "hydro-strike"
 
 [profile.release]
-debug = 0
+debug = 2
 lto = "fat"
 panic = "abort"
 codegen-units = 1
@@ -44,6 +44,9 @@ approx = { version = "0.5.1", features = ["num-complex"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
 
 [features]
+channel_power_2 = []
+
+default = ["channel_power_2"]
 
 [build-dependencies]
 cc = "1.1.31"

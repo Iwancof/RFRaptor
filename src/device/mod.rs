@@ -60,7 +60,7 @@ static INTERNAL_DEVICE_INFO: LazyLock<HashMap<&str, (&str, &str)>> = LazyLock::n
     hm
 });
 
-const NUM_CHANNELS: usize = 20usize;
+const NUM_CHANNELS: usize = 16usize;
 
 pub static SDR_RX_CONFIGS: LazyLock<Mutex<HashMap<usize, SDRConfig>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
