@@ -16,6 +16,7 @@ use burst::Burst;
 use fsk::FskDemod;
 
 use num_complex::Complex;
+use soapysdr::Device;
 use tungstenite::accept;
 
 use clap::Parser;
@@ -24,9 +25,14 @@ use clap::Parser;
 use thread_priority::{set_current_thread_priority, ThreadPriority};
 
 type ChannelReceiver = (usize, std::sync::mpsc::Receiver<Vec<Complex<f32>>>);
+type ChannelSender = (usize, std::sync::mpsc::Sender<Vec<Complex<f32>>>);
 
 use device::sdr::SDRConfig;
 use device::{SDR_RX_CONFIGS, SDR_TX_CONFIGS};
+
+static RUNNING: std::sync::LazyLock<std::sync::Arc<std::sync::atomic::AtomicBool>> = const {
+    std::sync::LazyLock::new(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)))
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -58,11 +64,6 @@ fn main() -> anyhow::Result<()> {
 
     let read_config = SDR_RX_CONFIGS.lock().unwrap()[&0].clone();
 
-    let mut channelizer = channelizer::Channelizer::new(read_config.num_channels, 4, 0.75);
-
-    let mut read_stream =
-        read_dev.rx_stream_args::<Complex<i8>, _>(&[read_config.channels], "buffers=65535")?;
-
     let mut write_stream =
         write_dev.tx_stream_args::<Complex<i8>, _>(&[read_config.channels], "")?;
 
@@ -70,14 +71,9 @@ fn main() -> anyhow::Result<()> {
     write_stream.write(&[&[Complex::new(0, 0); 1024]], None, true, 1_000_000)?;
     write_stream.deactivate(None)?;
 
-    let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
-
-    // fixed size buffer
-    let mut buffer = vec![Complex::new(0, 0); read_stream.mtu()?].into_boxed_slice();
-
     // let mut is_buffer_valid = [false; 96];
-    let mut sdridx_to_sender = vec![];
-    let mut blch_to_receiver = vec![];
+    let mut sdridx_to_sender: Vec<Option<ChannelSender>> = vec![];
+    let mut blch_to_receiver: Vec<Option<ChannelReceiver>> = vec![];
 
     for _ in 0..read_config.num_channels {
         sdridx_to_sender.push(None);
@@ -109,60 +105,91 @@ fn main() -> anyhow::Result<()> {
     create_catcher_threads(blch_to_receiver, read_config.clone());
     start_websocket()?;
 
-    let mut fft_result: Vec<Vec<Complex<f32>>> = (0..read_config.num_channels)
-        .map(|_| Vec::with_capacity(131072 / (read_config.num_channels / 2)))
-        .collect::<Vec<_>>();
+    start_rx_handler(read_dev, read_config, sdridx_to_sender);
 
-    // set thread priority
-    // set_current_thread_priority(ThreadPriority::Max).unwrap();
-
-    println!("read_config: {}", read_config);
-
-    read_stream.activate(None)?;
-    '_outer: for _ in 0.. {
-        let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
-        // println!("read: {}", _read);
-        // println!("{:?}", &buffer[_read-3..]);
-        // assert_eq!(read, buffer.len());
-
-        if let Some(remain_count) = read_dev
-            .channel_info(soapysdr::Direction::Rx, 0)?
-            .get("buffer_count")
-        {
-            let remain_count = remain_count.parse::<usize>()?;
-            log::trace!("remain_count: {}", remain_count);
-
-            // if 1000 < remain_count {
-            //     log::warn!("processing too slow: {}", remain_count);
-            // }
-        }
-
-        for fft in fft_result.iter_mut() {
-            fft.clear();
-        }
-
-        for chunk in buffer.chunks_exact_mut(read_config.num_channels / 2) {
-            for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
-                if sdridx_to_sender[sdridx].is_some() {
-                    fft_result[sdridx].push(*fft);
-                }
-            }
-        }
-
-        for ch_idx in 0..read_config.num_channels {
-            if let Some((_blch, tx)) = &sdridx_to_sender[ch_idx] {
-                tx.send(fft_result[ch_idx].clone())?;
-            }
-        }
-
-        if sb.caught() {
+    let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
+    loop {
+        if sb.caught() || !RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
     }
 
-    read_stream.deactivate(None)?;
+    RUNNING.store(false, std::sync::atomic::Ordering::Relaxed);
 
     Ok(())
+}
+
+fn start_rx_handler(
+    device: Device,
+    config: SDRConfig,
+    sdridx_to_sender: Vec<Option<ChannelSender>>,
+) {
+    std::thread::spawn(move || {
+        let ret: anyhow::Result<()> = try {
+            let mut channelizer = channelizer::Channelizer::new(config.num_channels, 4, 0.75);
+
+            let mut read_stream =
+                device.rx_stream_args::<Complex<i8>, _>(&[config.channels], "buffers=65535")?;
+
+            let mut fft_result: Vec<Vec<Complex<f32>>> = (0..config.num_channels)
+                .map(|_| Vec::with_capacity(131072 / (config.num_channels / 2)))
+                .collect::<Vec<_>>();
+
+            // fixed size buffer
+            let mut buffer = vec![Complex::new(0, 0); read_stream.mtu()?].into_boxed_slice();
+
+            println!("read_config: {}", config);
+
+            read_stream.activate(None)?;
+            '_outer: for _ in 0.. {
+                let _read = read_stream.read(&mut [&mut buffer[..]], 1_000_000)?;
+                // println!("read: {}", _read);
+                // println!("{:?}", &buffer[_read-3..]);
+                // assert_eq!(read, buffer.len());
+
+                if let Some(remain_count) = device
+                    .channel_info(soapysdr::Direction::Rx, 0)?
+                    .get("buffer_count")
+                {
+                    let remain_count = remain_count.parse::<usize>()?;
+                    log::trace!("remain_count: {}", remain_count);
+
+                    // if 1000 < remain_count {
+                    //     log::warn!("processing too slow: {}", remain_count);
+                    // }
+                }
+
+                for fft in fft_result.iter_mut() {
+                    fft.clear();
+                }
+
+                for chunk in buffer.chunks_exact_mut(config.num_channels / 2) {
+                    for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
+                        if sdridx_to_sender[sdridx].is_some() {
+                            fft_result[sdridx].push(*fft);
+                        }
+                    }
+                }
+
+                for ch_idx in 0..config.num_channels {
+                    if let Some((_blch, tx)) = &sdridx_to_sender[ch_idx] {
+                        tx.send(fft_result[ch_idx].clone())?;
+                    }
+                }
+
+                if !RUNNING.load(std::sync::atomic::Ordering::Relaxed) {
+                    break '_outer;
+                }
+            }
+
+            read_stream.deactivate(None)?;
+        };
+
+        if let Err(e) = ret {
+            log::error!("failed to start_rx_handler: {}", e);
+            RUNNING.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
 }
 
 fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) {
