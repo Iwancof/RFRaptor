@@ -3,6 +3,7 @@
 #![feature(test)]
 #![feature(try_blocks)]
 #![feature(generic_arg_infer)]
+#![feature(min_specialization)]
 
 mod bitops;
 mod bluetooth;
@@ -224,7 +225,8 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                 for s in received {
                     let ret: Result<(), ErrorKind> = try {
                         let packet = burst
-                            .catcher(s / num_channels as f32)
+                            // .catcher(s / num_channels as f32)
+                            .catcher(s)
                             .ok_or(ErrorKind::Catcher)?;
 
                         if packet.data.len() < 132 {
