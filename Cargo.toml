@@ -7,9 +7,9 @@ default-run = "hydro-strike"
 
 [profile.release]
 debug = 2
-lto = "fat"
+# lto = "fat"
 panic = "abort"
-codegen-units = 1
+# codegen-units = 1
 
 [dependencies]
 anyhow = { version = "1.0.86", features = ["backtrace"] }
