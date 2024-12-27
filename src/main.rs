@@ -233,6 +233,8 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                             continue;
                         }
 
+                        let rssi = packet.rssi_average;
+
                         let demodulated = fsk
                             .demodulate(packet.data)
                             .map_err(|e| ErrorKind::Demod(e))?;
@@ -251,6 +253,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                         PACKETS.lock().unwrap().push_back(bt.clone());
                         if let bluetooth::PacketInner::Advertisement(ref adv) = bt.packet.inner {
                             // log::info!("{}. remain: {}", adv, byte_to_ascii_string(&bt.remain));
+                            log::info!("{}", rssi);
                             log::info!("{}", adv);
 
                             // let cfg = pretty_hex::HexConfig { title: false, width: 8, group: 0, ..Default::default() };
@@ -267,8 +270,16 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                         ErrorKind::Catcher => {
                             //
                         }
-                        ErrorKind::Demod(d) => {
-                            // log::error!("failed to demodulate: {}", d);
+                        ErrorKind::Demod(_d) => {
+                            // static DEMOD_FAIL_COUNTER: std::sync::LazyLock<
+                            //     std::sync::atomic::AtomicUsize,
+                            // > = const {
+                            //     std::sync::LazyLock::new(|| std::sync::atomic::AtomicUsize::new(0))
+                            // };
+                            // // log::error!("failed to demodulate: {}", d);
+                            // let count = DEMOD_FAIL_COUNTER
+                            //     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            // println!("failed to demodulate: {} (count: {})", d, count);
                             //
                         }
                         ErrorKind::Bitops => {

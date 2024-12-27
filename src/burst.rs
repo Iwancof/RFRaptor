@@ -1,3 +1,4 @@
+use liquid_dsp_sys::agc_crcf_get_rssi;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -9,6 +10,8 @@ use crate::liquid::{liquid_do_int, liquid_get_pointer};
 pub struct Agc {
     crcf_s: std::ptr::NonNull<liquid_dsp_sys::agc_crcf_s>,
 }
+
+const AGC_THRESHOLD: f32 = -30.; // depends on the implementation of channelizer
 
 impl Agc {
     pub fn new() -> Self {
@@ -22,7 +25,7 @@ impl Agc {
 
             liquid_do_int(|| agc_crcf_squelch_enable(obj.as_ptr()))
                 .expect("agc_crcf_squelch_enable");
-            liquid_do_int(|| agc_crcf_squelch_set_threshold(obj.as_ptr(), -45.))
+            liquid_do_int(|| agc_crcf_squelch_set_threshold(obj.as_ptr(), AGC_THRESHOLD))
                 .expect("agc_crcf_squelch_set_threshold");
             liquid_do_int(|| agc_crcf_squelch_set_timeout(obj.as_ptr(), 100))
                 .expect("agc_crcf_squelch_set_timeout");
@@ -37,24 +40,29 @@ impl Agc {
         self.crcf_s.as_ptr()
     }
 
-    pub fn execute(&mut self, mut signal: Complex<f32>) -> (Complex<f32>, SquelchStatus) {
+    pub fn status(&self) -> SquelchStatus {
+        SquelchStatus::from_i32(unsafe { liquid_dsp_sys::agc_crcf_squelch_get_status(self.crcf()) })
+            .expect("agc_crcf_squelch_get_status")
+    }
+
+    pub fn get_rssi(&self) -> f32 {
+        unsafe { agc_crcf_get_rssi(self.crcf()) }
+    }
+
+    pub fn execute(&mut self, mut signal: Complex<f32>) -> (Complex<f32>, SquelchStatus, f32) {
         use liquid_dsp_sys::*;
 
         liquid_do_int(|| unsafe { agc_crcf_execute(self.crcf(), signal, &mut signal) })
             .expect("agc_crcf_execute");
 
-        (signal, self.status())
-    }
-
-    pub fn status(&self) -> SquelchStatus {
-        SquelchStatus::from_i32(unsafe { liquid_dsp_sys::agc_crcf_squelch_get_status(self.crcf()) })
-            .expect("agc_crcf_squelch_get_status")
+        (signal, self.status(), self.get_rssi())
     }
 }
 
 impl Drop for Agc {
     fn drop(&mut self) {
-        liquid_do_int(|| unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf()) }).expect("agc_crcf_destroy");
+        liquid_do_int(|| unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf()) })
+            .expect("agc_crcf_destroy");
     }
 }
 
@@ -62,6 +70,7 @@ impl Drop for Agc {
 pub struct Burst {
     pub crcf: Agc,
     in_burst: bool,
+    rssi_average: f32,
     burst: Vec<Complex<f32>>,
 }
 
@@ -85,6 +94,9 @@ pub struct Packet<'a> {
 
     #[allow(unused)]
     pub timestamp: DateTime<Utc>,
+
+    #[allow(unused)]
+    pub rssi_average: f32,
 }
 
 impl Burst {
@@ -92,26 +104,30 @@ impl Burst {
         Self {
             crcf: Agc::new(),
             in_burst: false,
+            rssi_average: 0.0,
             burst: Vec::new(),
         }
     }
 
     #[allow(unused)]
     pub fn catcher(&mut self, signal: Complex<f32>) -> Option<Packet> {
-        let (signal, status) = self.crcf.execute(signal);
+        let (signal, status, rssi) = self.crcf.execute(signal);
 
         match status {
             SquelchStatus::Rise => {
                 self.in_burst = true;
                 self.burst.clear();
+                self.rssi_average = 0.;
             }
             SquelchStatus::SignalHi => {
                 self.burst.push(signal);
+                self.rssi_average += rssi;
             }
             SquelchStatus::Timeout => {
                 self.in_burst = false;
 
                 return Some(Packet {
+                    rssi_average: self.rssi_average / self.burst.len() as f32,
                     data: &mut self.burst,
                     timestamp: Utc::now(),
                 });
