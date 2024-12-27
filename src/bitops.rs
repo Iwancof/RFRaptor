@@ -97,7 +97,7 @@ pub fn packet_to_bits(bytes: &[u8], freq: usize, aa: u32) -> Vec<u8> {
     let mut bits = Vec::new();
 
     Preamble::encode(&mut bits);
-    
+
     // offset = 2
     bits.push(0);
     bits.push(0);
@@ -111,7 +111,10 @@ pub fn packet_to_bits(bytes: &[u8], freq: usize, aa: u32) -> Vec<u8> {
     let header_padding = 0;
     let length = bytes.len() as u8;
 
-    WhitedByte { byte: header_padding }.encode(&mut bits, &mut whitening);
+    WhitedByte {
+        byte: header_padding,
+    }
+    .encode(&mut bits, &mut whitening);
     WhitedByte { byte: length }.encode(&mut bits, &mut whitening);
 
     for b in bytes {

@@ -82,7 +82,7 @@ pub struct AdvData {
 }
 
 impl Bluetooth {
-    pub fn from_bytes(mut byte_packet: BytePacket , freq: usize) -> Result<Self, DecodeError> {
+    pub fn from_bytes(mut byte_packet: BytePacket, freq: usize) -> Result<Self, DecodeError> {
         let len = byte_packet.bytes.len();
         let mut crc = [0, 0, 0];
         for (i, b) in byte_packet.bytes.drain(len - 3..).enumerate() {
@@ -206,7 +206,13 @@ impl AdvData {
 
         let (input, data) = take(len)(input)?;
 
-        Ok((input, AdvData { len, data: data.to_vec() }))
+        Ok((
+            input,
+            AdvData {
+                len,
+                data: data.to_vec(),
+            },
+        ))
     }
 }
 

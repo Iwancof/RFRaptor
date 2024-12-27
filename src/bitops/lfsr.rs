@@ -74,7 +74,7 @@ mod test {
     #[test]
     fn uptest_lsfr() {
         let raw_bits = vec![0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1]; // random bits
-        
+
         let mut lfsr = super::LFSR0221::from_ch(0);
         let mut whited_bits = vec![];
 
@@ -84,7 +84,7 @@ mod test {
 
         let mut lfsr = super::LFSR0221::from_ch(0);
         let mut dewhited_bits = vec![];
-        
+
         for b in whited_bits.iter() {
             dewhited_bits.push(b ^ lfsr.next_white());
         }

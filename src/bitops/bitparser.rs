@@ -1,5 +1,5 @@
-use nom::{bytes::complete::take, error::ErrorKind};
 use super::lfsr;
+use nom::{bytes::complete::take, error::ErrorKind};
 
 #[derive(Debug)]
 pub struct Lap {
@@ -35,11 +35,7 @@ impl Lap {
                 /*
                 lap: Some(btbb_packet.LAP),
                 */
-                lap: Some(
-                    unsafe {
-                        libbtbb_sys::btbb_packet_get_lap(&btbb_packet)
-                    }
-                )
+                lap: Some(unsafe { libbtbb_sys::btbb_packet_get_lap(&btbb_packet) }),
             },
         ))
     }
@@ -133,7 +129,6 @@ impl WhitedByte {
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {
