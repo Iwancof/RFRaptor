@@ -127,7 +127,6 @@ fn start_rx_handler(
 ) {
     std::thread::spawn(move || {
         let ret: anyhow::Result<()> = try {
-            // let mut channelizer = channelizer::Channelizer::new(config.num_channels, 4, 0.75);
             let mut channelizer = channelizer::Channelizer::new(config.num_channels);
 
             let mut read_stream =
