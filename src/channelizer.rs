@@ -3,7 +3,7 @@ use std::default;
 
 use az::WrappingAs;
 
-use liquid_dsp_sys::{firpfbch2_crcf_create_kaiser, LIQUID_SYNTHESIZER};
+use liquid_dsp_sys::{firpfbch2_crcf_create_kaiser, LIQUID_ANALYZER, LIQUID_SYNTHESIZER};
 use num_complex::Complex;
 use num_traits::Float;
 
@@ -51,8 +51,8 @@ impl Signal for i8 {
     }
     fn from_f32(f: f32) -> Self::InternalRepr {
         // TODO: fix this with simply casting
-        // ((f * 32768.0).round() as i32).wrapping_as::<i16>() as i32
-        (f * 32768.0).round() as i32
+        ((f * 32768.0).round() as i32).wrapping_as::<i16>() as i32
+        // (f * 32768.0).round() as i32
     }
     fn to_f32(sg: Self::InternalRepr) -> f32 {
         const SCALE: f32 = 1.0 / 32768.0;
@@ -65,6 +65,111 @@ where
     F: Fn(T) -> U,
 {
     Complex::new(f(a.re), f(a.im))
+}
+
+pub struct ChannelizerLiquid {
+    num_channels: usize,
+
+    analyzer: core::ptr::NonNull<liquid_dsp_sys::firpfbch2_crcf_s>,
+
+    #[doc(hidden)]
+    channel_half: usize,
+
+    #[doc(hidden)]
+    working_buffer: Vec<Complex<f32>>,
+    // len(working_buffer) = num_channels
+}
+
+pub struct SynthesizerLiquid {
+    num_channels: usize,
+
+    synthesizer: core::ptr::NonNull<liquid_dsp_sys::firpfbch2_crcf_s>,
+
+    #[doc(hidden)]
+    channel_half: usize,
+
+    #[doc(hidden)]
+    working_buffer: Vec<Complex<f32>>,
+    // len(working_buffer) = num_channels
+}
+
+impl ChannelizerLiquid {
+    pub fn new(num_channels: usize) -> Self {
+        let analyzer = liquid_get_pointer(|| unsafe {
+            firpfbch2_crcf_create_kaiser(
+                LIQUID_ANALYZER as i32,
+                num_channels as u32,
+                SYMBOL_DELAY,
+                60.0,
+            )
+        })
+        .expect("firpfbch2_crcf_create_kaiser failed (channelizer)");
+
+        Self {
+            num_channels,
+            channel_half: num_channels / 2,
+            analyzer,
+            working_buffer: vec![Complex::new(0.0, 0.0); num_channels],
+        }
+    }
+
+    pub fn channelize(&mut self, input: &[Complex<f32>]) -> &[Complex<f32>] {
+        debug_assert_eq!(input.len(), self.channel_half);
+        debug_assert_eq!(self.working_buffer.len(), self.num_channels);
+
+        liquid_do_int(|| unsafe {
+            liquid_dsp_sys::firpfbch2_crcf_execute(
+                self.analyzer.as_ptr(),
+                input.as_ptr() as *mut _,
+                self.working_buffer.as_mut_ptr(),
+            )
+        })
+        .expect("firpfbch2_crcf_execute failed");
+
+        for x in self.working_buffer.iter_mut() {
+            // x.re /= 128.0;
+            // x.im /= 128.0;
+        }
+
+        &self.working_buffer
+    }
+}
+
+impl SynthesizerLiquid {
+    pub fn new(num_channels: usize) -> Self {
+        let synthesizer = liquid_get_pointer(|| unsafe {
+            firpfbch2_crcf_create_kaiser(
+                LIQUID_SYNTHESIZER as i32,
+                num_channels as u32,
+                SYMBOL_DELAY,
+                60.0,
+            )
+        })
+        .expect("firpfbch2_crcf_create_kaiser failed (synthesizer)");
+
+        Self {
+            num_channels,
+            channel_half: num_channels / 2,
+            synthesizer,
+            working_buffer: vec![Complex::new(0.0, 0.0); num_channels / 2],
+        }
+    }
+
+    pub fn synthesizer(&mut self, input: &[Complex<f32>]) -> &[Complex<f32>] {
+        debug_assert_eq!(input.len(), self.num_channels);
+        debug_assert_eq!(self.working_buffer.len(), self.channel_half);
+
+        liquid_do_int(|| unsafe {
+            liquid_dsp_sys::firpfbch2_crcf_execute(
+                self.synthesizer.as_ptr(),
+                input.as_ptr() as *mut _,
+                self.working_buffer.as_mut_ptr(),
+            )
+        })
+        .expect("firpfbch2_crcf_execute failed");
+
+        &self.working_buffer
+    }
 }
 
 /// Channelizer
@@ -155,6 +260,8 @@ where
 
     #[allow(unused)]
     fn push_to_window(&mut self, input: &[Complex<S>]) {
+        debug_assert_eq!(input.len(), self.channel_half);
+
         if self.flag {
             for (i, data) in input.iter().enumerate() {
                 // let &Complex { re, im } = data;
@@ -225,8 +332,18 @@ where
         self.fft.process(&mut self.float_work_buffer);
 
         for x in self.float_work_buffer.iter_mut() {
-            x.re /= self.num_channels as f32 * 256.;
-            x.im /= self.num_channels as f32 * 256.;
+            x.re /= self.num_channels as f32;
+            x.im /= self.num_channels as f32;
+            // x.re /= 256.0;
+            // x.im /= 256.0;
+            // x.re /= 128.0;
+            // x.im /= 128.0;
+            // x.re /= 1.5;
+            // x.im /= 1.5;
+
+
+            // x.re *= 2.0;
+            // x.im *= 2.0;
         }
 
         &mut self.float_work_buffer
@@ -555,6 +672,15 @@ fn generate_kaiser(channel: usize, m: usize, lp_cutoff: f32) -> Vec<f32> {
         buffer.set_len(h_len);
     };
 
+    let mut sum = 0.0;
+    for x in buffer.iter() {
+        sum += x;
+    }
+
+    for x in buffer.iter_mut() {
+        *x *= channel as f32 / sum;
+    }
+
     buffer
 }
 
@@ -566,6 +692,103 @@ mod test {
     use rand::{rngs::SmallRng, Rng, SeedableRng};
 
     use std::simd::*;
+
+    #[test]
+    fn float_channelizer() {
+        let num_channels = 16;
+        let mut channelizer = Channelizer::<f32>::new(num_channels, 4, 0.75);
+
+        let div = 127.0;
+        let data = [
+            Complex::new(0.0 / div, 1.0 / div),
+            Complex::new(1.0 / div, 0.0 / div),
+            Complex::new(2.0 / div, 1.0 / div),
+            Complex::new(-3.0 / div, 3.0 / div),
+            Complex::new(4.0 / div, 2.0 / div),
+            Complex::new(5.0 / div, 3.0 / div),
+            Complex::new(6.0 / div, -4.0 / div),
+            Complex::new(7.0 / div, 5.0 / div),
+        ];
+
+        println!("{:.20?}", &channelizer.channelize_fft(&data)[..1]);
+
+        let mut channelizer = ChannelizerLiquid::new(num_channels);
+
+        println!("{:.20?}", &channelizer.channelize(&data)[..1]);
+
+        let mut channelizer = Channelizer::<i8>::new(num_channels, 4, 1.0);
+
+        let data = [
+            Complex::new(0, 1),
+            Complex::new(1, 0),
+            Complex::new(2, 1),
+            Complex::new(-3, 3),
+            Complex::new(4, 2),
+            Complex::new(5, 3),
+            Complex::new(6, -4),
+            Complex::new(7, 5),
+        ];
+
+        println!("{:.20?}", &channelizer.channelize_fft(&data)[..1]);
+
+        panic!();
+    }
+
+    /*
+    #[test]
+    fn uptest_integer() {
+        let num_channels = 16;
+        let mut channelizer = Channelizer::<i8>::new(num_channels, 4, 0.75);
+        let mut synthesizer = Synthesizer::<f32>::new(num_channels, 4, 0.5);
+        let mut synthesizer_liquid = SynthesizerLiquid::new(num_channels);
+
+        fn c(x: i8, y: i8) -> Complex<i8> {
+            Complex::new(x, y)
+        }
+        let data = [
+            c(0, 1),
+            c(1, 0),
+            c(2, 1),
+            c(-3, 3),
+            c(4, 2),
+            c(5, 3),
+            c(6, -4),
+            c(7, 5),
+        ];
+
+        let data_num = 100;
+        let mut syn = vec![];
+        let mut syn_liquid = vec![];
+
+        for _ in 0..data_num {
+            // let channelized = channelizer.channelize_fft(&data);
+            let channelized = channelizer.channelize_fft(&data);
+            let synthesized = synthesizer.ifft_synthesizer(channelized);
+            let synthesized_liquid = synthesizer_liquid.synthesizer(channelized);
+
+            syn.extend_from_slice(&synthesized);
+            syn_liquid.extend_from_slice(synthesized_liquid);
+        }
+
+        let delay = 2 * num_channels * SYMBOL_DELAY as usize - num_channels / 2 + 1;
+        for i in 0..data_num * num_channels {
+            let compare = if i < delay {
+                Complex::new(0, 0)
+            } else {
+                data[i - delay]
+            };
+
+            println!(
+                "{}: syn: {:.15?}, syn_liquid: {:.15?}, compare: {:?}",
+                i, syn[i], syn_liquid[i], compare
+            );
+            // println!("{:.15?}, {:.15?}", syn[i], syn_liquid[i]);
+            // rmes += (synthesized[i] - compare).norm_sqr();
+        }
+
+        panic!();
+    }
+    */
 
     include!("./def_test_data/channelizer.rs");
 

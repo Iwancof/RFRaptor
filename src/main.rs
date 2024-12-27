@@ -127,17 +127,18 @@ fn start_rx_handler(
 ) {
     std::thread::spawn(move || {
         let ret: anyhow::Result<()> = try {
-            let mut channelizer = channelizer::Channelizer::new(config.num_channels, 4, 0.75);
+            // let mut channelizer = channelizer::Channelizer::new(config.num_channels, 4, 0.75);
+            let mut channelizer = channelizer::ChannelizerLiquid::new(config.num_channels);
 
             let mut read_stream =
-                device.rx_stream_args::<Complex<i8>, _>(&[config.channels], "buffers=65535")?;
+                device.rx_stream_args::<Complex<f32>, _>(&[config.channels], "buffers=65535")?;
 
             let mut fft_result: Vec<Vec<Complex<f32>>> = (0..config.num_channels)
                 .map(|_| Vec::with_capacity(131072 / (config.num_channels / 2)))
                 .collect::<Vec<_>>();
 
             // fixed size buffer
-            let mut buffer = vec![Complex::new(0, 0); read_stream.mtu()?].into_boxed_slice();
+            let mut buffer = vec![Complex::default(); read_stream.mtu()?].into_boxed_slice();
 
             println!("read_config: {}", config);
 
@@ -165,7 +166,7 @@ fn start_rx_handler(
                 }
 
                 for chunk in buffer.chunks_exact_mut(config.num_channels / 2) {
-                    for (sdridx, fft) in channelizer.channelize_fft(chunk).iter().enumerate() {
+                    for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
                         if sdridx_to_sender[sdridx].is_some() {
                             fft_result[sdridx].push(*fft);
                         }

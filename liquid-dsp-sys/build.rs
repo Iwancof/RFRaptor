@@ -36,6 +36,6 @@ fn main() {
     // add library search path
     println!("cargo:rustc-link-search=native={}/liquid-dsp", crate_dir);
 
-    println!("cargo:rustc-link-lib=dylib=liquid");
+    println!("cargo:rustc-link-lib=static=liquid");
     println!("cargo:rustc-link-lib=dylib=fftw3f");
 }
