@@ -128,7 +128,7 @@ fn start_rx_handler(
     std::thread::spawn(move || {
         let ret: anyhow::Result<()> = try {
             // let mut channelizer = channelizer::Channelizer::new(config.num_channels, 4, 0.75);
-            let mut channelizer = channelizer::ChannelizerLiquid::new(config.num_channels);
+            let mut channelizer = channelizer::Channelizer::new(config.num_channels);
 
             let mut read_stream =
                 device.rx_stream_args::<Complex<f32>, _>(&[config.channels], "buffers=65535")?;
