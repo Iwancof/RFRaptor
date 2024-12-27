@@ -10,7 +10,6 @@ use anyhow::Context;
 use soapysdr::Device;
 
 use sdr::SDRConfig;
-use serde_yaml;
 
 mod config {
     #[derive(Debug, serde::Deserialize, serde::Serialize)]

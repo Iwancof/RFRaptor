@@ -1,9 +1,4 @@
-#![feature(array_chunks)]
-#![feature(portable_simd)]
-#![feature(test)]
 #![feature(try_blocks)]
-#![feature(generic_arg_infer)]
-#![feature(min_specialization)]
 
 mod bitops;
 mod bluetooth;
@@ -236,9 +231,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
 
                         let rssi = packet.rssi_average;
 
-                        let demodulated = fsk
-                            .demodulate(packet.data)
-                            .map_err(|e| ErrorKind::Demod(e))?;
+                        let demodulated = fsk.demodulate(packet.data).map_err(ErrorKind::Demod)?;
 
                         let (remain_bits, byte_packet) =
                             bitops::bits_to_packet(&demodulated.bits, freq as usize)

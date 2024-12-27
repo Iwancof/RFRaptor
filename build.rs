@@ -3,19 +3,6 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=src/apply_filter.c");
 
-    use cc::Build;
-
-    // use AVX2
-    Build::new()
-        .file("src/apply_filter.c")
-        .opt_level(2)
-        .flag("-mavx2")
-        .flag("-march=native")
-        .define("FORTIFY_SOURCE", "2")
-        .warnings(true)
-        .extra_warnings(true)
-        .compile("libapply_filter.a");
-
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
@@ -41,7 +28,7 @@ fn main() {
         println!("cargo:rerun-if-changed={}", project_dir);
 
         let status = Command::new("cmake")
-            .args(&["-S", &project_dir, "-B", &build_dir])
+            .args(["-S", &project_dir, "-B", &build_dir])
             .status()
             .expect("Failed to run cmake");
 
@@ -50,7 +37,7 @@ fn main() {
         }
 
         let status = Command::new("cmake")
-            .args(&["--build", &build_dir])
+            .args(["--build", &build_dir])
             .status()
             .expect("Failed to run cmake");
 
