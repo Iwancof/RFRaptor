@@ -36,12 +36,17 @@ soapysdr = { version = "0.4.0", features = ["log"] }
 thread-priority = "1.1.0"
 tungstenite = "0.24.0"
 useful_number = "0.1.2"
-wrcap = { version = "0.1.0", path = "../../../Rust/wrcap" }
+wrcap = { version = "0.1.0", path = "../../../Rust/wrcap", optional = true }
 zerocopy = "0.8.9"
 
 [dev-dependencies]
 approx = { version = "0.5.1", features = ["num-complex"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
+
+[features]
+capture_stdout = ["wrcap"]
+
+default = []
 
 [build-dependencies]
 cc = "1.1.31"

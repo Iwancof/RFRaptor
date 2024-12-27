@@ -115,23 +115,26 @@ impl Drop for Channelizer {
 
 impl core::fmt::Display for Channelizer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        use wrcap::lent_stdout;
-
-        let ((), content) = lent_stdout()
-            .unwrap()
-            .capture_string(|| {
-                unsafe {
-                    liquid_dsp_sys::firpfbch2_crcf_print(self.analyzer.as_ptr());
-                };
-            })
-            .unwrap();
-
         writeln!(f, "Channelizer")?;
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- analyser: {:p}", self.analyzer)?;
 
         writeln!(f, "- firpfbch2_crcf_print")?;
-        write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
+
+        #[cfg(feature = "capture_stdout")]
+        {
+            use wrcap::lent_stdout;
+
+            let ((), content) = lent_stdout()
+                .unwrap()
+                .capture_string(|| {
+                    unsafe {
+                        liquid_dsp_sys::firpfbch2_crcf_print(self.analyzer.as_ptr());
+                    };
+                })
+                .unwrap();
+            write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
+        }
 
         Ok(())
     }
@@ -148,23 +151,26 @@ impl Drop for Synthesizer {
 
 impl core::fmt::Display for Synthesizer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        use wrcap::lent_stdout;
-
-        let ((), content) = lent_stdout()
-            .unwrap()
-            .capture_string(|| {
-                unsafe {
-                    liquid_dsp_sys::firpfbch2_crcf_print(self.synthesizer.as_ptr());
-                };
-            })
-            .unwrap();
-
         writeln!(f, "Synthesizer")?;
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- synthesizer: {:p}", self.synthesizer)?;
 
         writeln!(f, "- firpfbch2_crcf_print")?;
-        write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
+
+        #[cfg(feature = "capture_stdout")]
+        {
+            use wrcap::lent_stdout;
+
+            let ((), content) = lent_stdout()
+                .unwrap()
+                .capture_string(|| {
+                    unsafe {
+                        liquid_dsp_sys::firpfbch2_crcf_print(self.synthesizer.as_ptr());
+                    };
+                })
+                .unwrap();
+            write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
+        }
 
         Ok(())
     }

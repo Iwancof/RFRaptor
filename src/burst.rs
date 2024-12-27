@@ -59,6 +59,12 @@ impl Agc {
     }
 }
 
+impl Default for Agc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for Agc {
     fn drop(&mut self) {
         liquid_do_int(|| unsafe { liquid_dsp_sys::agc_crcf_destroy(self.crcf()) })
@@ -138,5 +144,11 @@ impl Burst {
         }
 
         None
+    }
+}
+
+impl Default for Burst {
+    fn default() -> Self {
+        Self::new()
     }
 }

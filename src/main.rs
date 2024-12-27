@@ -1,12 +1,4 @@
-#![feature(try_blocks)]
-
-mod bitops;
-mod bluetooth;
-mod burst;
-mod channelizer;
-mod device;
-mod fsk;
-mod liquid;
+use hydro_strike::*;
 
 use burst::Burst;
 use fsk::FskDemod;
@@ -121,7 +113,7 @@ fn start_rx_handler(
     sdridx_to_sender: Vec<Option<ChannelSender>>,
 ) {
     std::thread::spawn(move || {
-        let ret: anyhow::Result<()> = try {
+        let ret: anyhow::Result<()> = (|| {
             let mut channelizer = channelizer::Channelizer::new(config.num_channels);
             log::info!("\n{}", channelizer);
 
@@ -180,7 +172,9 @@ fn start_rx_handler(
             }
 
             read_stream.deactivate(None)?;
-        };
+
+            Ok(())
+        })();
 
         if let Err(e) = ret {
             log::error!("failed to start_rx_handler: {}", e);
@@ -208,6 +202,7 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
             #[derive(Debug)]
             enum ErrorKind {
                 Catcher,
+                TooShort,
                 Demod(anyhow::Error),
                 Bitops,
                 Bluetooth,
@@ -219,14 +214,14 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                 };
 
                 for s in received {
-                    let ret: Result<(), ErrorKind> = try {
+                    let ret: Result<(), ErrorKind> = (|| {
                         let packet = burst
                             // .catcher(s / num_channels as f32)
                             .catcher(s)
                             .ok_or(ErrorKind::Catcher)?;
 
                         if packet.data.len() < 132 {
-                            continue;
+                            return Err(ErrorKind::TooShort);
                         }
 
                         let rssi = packet.rssi_average;
@@ -254,7 +249,9 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
                             // let hex = pretty_hex::config_hex(&bt.remain, cfg);
                             // log::info!("\n{}", hex);
                         }
-                    };
+
+                        Ok(())
+                    })();
 
                     let Err(kind) = ret else {
                         continue;
@@ -262,6 +259,9 @@ fn create_catcher_threads(rxs: Vec<Option<ChannelReceiver>>, config: SDRConfig) 
 
                     match kind {
                         ErrorKind::Catcher => {
+                            //
+                        }
+                        ErrorKind::TooShort => {
                             //
                         }
                         ErrorKind::Demod(_d) => {
