@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rutn-if-changed=liquid-dsp/libliquid.a");
+    println!("cargo:rerun-if-changed=liquid-dsp/libliquid.a");
 
     /*
     std::process::Command::new("sh")

@@ -73,11 +73,6 @@ impl Channelizer {
         })
         .expect("firpfbch2_crcf_execute failed");
 
-        for d in self.working_buffer.iter_mut() {
-            d.re /= 1.5;
-            d.im /= 1.5;
-        }
-
         &self.working_buffer
     }
 }
