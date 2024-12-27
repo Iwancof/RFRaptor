@@ -169,3 +169,57 @@ impl core::fmt::Display for Synthesizer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use rand::prelude::*;
+
+    #[test]
+    fn uptest_random_data() {
+        let num_channels = 8;
+        let samples = num_channels * 100;
+
+        let mut channelizer = Channelizer::new(num_channels);
+        let mut synthesizer = Synthesizer::new(num_channels);
+
+        println!("{}", channelizer);
+        println!("{}", synthesizer);
+
+        let seed = 0;
+        let mut rng = SmallRng::seed_from_u64(seed);
+
+        let data = (0..samples)
+            .map(|_| Complex::new(rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0)))
+            .collect::<Vec<_>>();
+        let mut synthesized = vec![];
+
+        for chunk in data.chunks(num_channels / 2) {
+            let channelized = channelizer.channelize(chunk);
+            let syn = synthesizer.synthesizer(channelized);
+
+            synthesized.extend_from_slice(syn);
+        }
+
+        let delay = 2 * num_channels * SYMBOL_DELAY as usize - num_channels / 2 + 1;
+
+        let mut rmes = 0.0;
+        for i in 0..samples {
+            let compare = if i < delay {
+                Complex::new(0.0, 0.0)
+            } else {
+                data[i - delay]
+            };
+
+            println!("{}: {:?} == {:?}", i, synthesized[i], compare);
+            rmes += (synthesized[i] - compare).norm_sqr();
+        }
+
+        rmes /= samples as f32;
+        rmes = rmes.sqrt();
+
+        println!("RMES: {}", rmes);
+        assert!(rmes < 1e-3);
+    }
+}

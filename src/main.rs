@@ -128,6 +128,7 @@ fn start_rx_handler(
     std::thread::spawn(move || {
         let ret: anyhow::Result<()> = try {
             let mut channelizer = channelizer::Channelizer::new(config.num_channels);
+            log::info!("\n{}", channelizer);
 
             let mut read_stream =
                 device.rx_stream_args::<Complex<f32>, _>(&[config.channels], "buffers=65535")?;
@@ -139,7 +140,7 @@ fn start_rx_handler(
             // fixed size buffer
             let mut buffer = vec![Complex::default(); read_stream.mtu()?].into_boxed_slice();
 
-            println!("read_config: {}", config);
+            log::info!("read_config: {}", config);
 
             read_stream.activate(None)?;
             '_outer: for _ in 0.. {
