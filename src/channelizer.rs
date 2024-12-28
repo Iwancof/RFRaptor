@@ -89,7 +89,7 @@ impl Synthesizer {
         }
     }
 
-    pub fn synthesizer(&mut self, input: &[Complex<f32>]) -> &[Complex<f32>] {
+    pub fn synthesize(&mut self, input: &[Complex<f32>]) -> &[Complex<f32>] {
         debug_assert_eq!(input.len(), self.num_channels);
         debug_assert_eq!(self.working_buffer.len(), self.channel_half);
 
@@ -203,7 +203,7 @@ mod tests {
 
         for chunk in data.chunks(num_channels / 2) {
             let channelized = channelizer.channelize(chunk);
-            let syn = synthesizer.synthesizer(channelized);
+            let syn = synthesizer.synthesize(channelized);
 
             synthesized.extend_from_slice(syn);
         }

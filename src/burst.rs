@@ -75,7 +75,7 @@ impl Drop for Agc {
 #[derive(Debug)]
 pub struct Burst {
     pub crcf: Agc,
-    in_burst: bool,
+    pub in_burst: bool,
     rssi_average: f32,
     burst: Vec<Complex<f32>>,
 }

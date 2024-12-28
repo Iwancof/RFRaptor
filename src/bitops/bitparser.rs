@@ -125,7 +125,7 @@ impl WhitedByte {
 
     pub fn encode(&self, dest: &mut Vec<u8>, lsfr: &mut lfsr::LFSR0221) {
         for i in 0..8 {
-            dest.push((self.byte >> i) ^ lsfr.next_white());
+            dest.push(((self.byte >> i) & 1) ^ lsfr.next_white());
         }
     }
 }
