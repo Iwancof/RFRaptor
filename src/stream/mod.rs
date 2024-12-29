@@ -7,37 +7,38 @@ type RxChannelReceiver = (
     std::sync::mpsc::Receiver<Vec<num_complex::Complex<f32>>>,
 );
 
+use std::collections::HashMap;
+
 impl crate::device::Device {
     fn prepare_pfbch2_fsk_mpsc(
         &self,
-    ) -> (Vec<Option<RxChannelSender>>, Vec<Option<RxChannelReceiver>>) {
-        let mut sdridx_to_sender: Vec<Option<RxChannelSender>> = vec![];
-        let mut blch_to_receiver: Vec<Option<RxChannelReceiver>> = vec![];
+    ) -> (
+        HashMap<usize, RxChannelSender>,
+        HashMap<usize, RxChannelReceiver>,
+    ) {
+        let mut sdridx_to_sender: HashMap<usize, RxChannelSender> = HashMap::new();
+        let mut blch_to_receiver: HashMap<usize, RxChannelReceiver> = HashMap::new();
 
-        for _ in 0..self.config.num_channels {
-            sdridx_to_sender.push(None);
-        }
-        for _ in 0..96 {
-            blch_to_receiver.push(None);
-        }
+        let channel_half = self.config.num_channels as isize / 2;
 
         for (sdr_idx, (tx, rx)) in (0..self.config.num_channels)
             .map(|_| std::sync::mpsc::channel::<Vec<num_complex::Complex<f32>>>())
             .enumerate()
         {
             let sdr_idx_isize = sdr_idx as isize;
-            let freq = self.config.freq_mhz as isize
-                + if sdr_idx_isize < (self.config.num_channels as isize / 2) {
-                    sdr_idx_isize
-                } else {
-                    sdr_idx_isize - self.config.num_channels as isize
-                };
+            let freq_offset = if sdr_idx_isize < channel_half {
+                sdr_idx_isize
+            } else {
+                sdr_idx_isize - self.config.num_channels as isize
+            };
+
+            let freq = self.config.freq_mhz as isize + freq_offset;
 
             if freq & 1 == 0 && (2402..=2480).contains(&freq) {
                 let blch = ((freq - 2402) / 2) as usize;
 
-                sdridx_to_sender[sdr_idx] = Some((blch, tx));
-                blch_to_receiver[blch] = Some((sdr_idx, rx));
+                sdridx_to_sender.insert(sdr_idx, (blch, tx));
+                blch_to_receiver.insert(blch, (sdr_idx, rx));
             }
         }
 
@@ -46,7 +47,7 @@ impl crate::device::Device {
 
     fn wake_channelizer(
         &mut self,
-        sdridx_to_sender: Vec<Option<RxChannelSender>>,
+        sdridx_to_sender: HashMap<usize, RxChannelSender>,
     ) -> anyhow::Result<()> {
         let config = self.config.clone();
         let raw = self.raw.clone();
@@ -93,15 +94,15 @@ impl crate::device::Device {
 
                 for chunk in buffer.chunks_exact_mut(config.num_channels / 2) {
                     for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
-                        if sdridx_to_sender[sdridx].is_some() {
+                        if sdridx_to_sender.contains_key(&sdridx) {
                             fft_result[sdridx].push(*fft);
                         }
                     }
                 }
 
-                for ch_idx in 0..config.num_channels {
-                    if let Some((_blch, tx)) = &sdridx_to_sender[ch_idx] {
-                        tx.send(fft_result[ch_idx].clone())?;
+                for (ch_idx, fft) in fft_result.iter().enumerate() {
+                    if let Some((_blch, tx)) = sdridx_to_sender.get(&ch_idx) {
+                        tx.send(fft.clone())?;
                     }
                 }
 
@@ -120,20 +121,17 @@ impl crate::device::Device {
 
     fn create_catcher_threads(
         &mut self,
-        rxs: Vec<Option<RxChannelReceiver>>,
+        // rxs: Vec<Option<RxChannelReceiver>>,
+        rxs: HashMap<usize, RxChannelReceiver>,
         sender: std::sync::mpsc::Sender<crate::bluetooth::Bluetooth>,
     ) -> anyhow::Result<()> {
         let sample_rate = self.config.sample_rate;
         let num_channels = self.config.num_channels;
 
-        for (ble_ch_idx, sdr_idx_rx) in rxs
-            .into_iter()
-            .enumerate()
-            .filter(|(_, sdr_idx_rx)| sdr_idx_rx.is_some())
-        {
+        for (ble_ch_idx, sdr_idx_rx) in rxs.into_iter() {
             let freq = 2402 + 2 * ble_ch_idx as u32;
 
-            let (_sdr_idx, rx) = sdr_idx_rx.unwrap();
+            let (_sdr_idx, rx) = sdr_idx_rx;
             let sender = sender.clone();
             std::thread::spawn(move || {
                 let mut burst = crate::burst::Burst::new();
@@ -167,7 +165,7 @@ impl crate::device::Device {
                             let demodulated = fsk.demodulate(packet).map_err(ErrorKind::Demod)?;
 
                             let byte_packet =
-                                crate::bitops::bits_to_packet(&demodulated.bits, freq as usize)
+                                crate::bitops::fsk_to_packet(demodulated, freq as usize)
                                     .map_err(|_| ErrorKind::Bitops)?;
 
                             if !byte_packet.remain_bits.is_empty() {
@@ -223,15 +221,17 @@ impl crate::device::Device {
 
     pub fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>> {
         // sink/source Bluetooth Packet
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (packet_sink, packet_source) = std::sync::mpsc::channel();
         *self.running.lock().expect("failed to lock") = true;
 
         let (sdridx_to_sender, blch_to_receiver) = self.prepare_pfbch2_fsk_mpsc();
 
         self.wake_channelizer(sdridx_to_sender)?;
-        self.create_catcher_threads(blch_to_receiver, sender)?;
+        self.create_catcher_threads(blch_to_receiver, packet_sink)?;
 
-        Ok(RxStream { source: receiver })
+        Ok(RxStream {
+            source: packet_source,
+        })
     }
 
     /*
