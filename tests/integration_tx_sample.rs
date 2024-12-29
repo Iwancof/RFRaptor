@@ -12,12 +12,8 @@ fn fsk_bits() {
     let bits = bitops::packet_to_bits(&original_bytes, 2427, 0xdeadbeef);
     let modulated = modulater.modulate(&bits).unwrap();
 
-    let demodulated = demodulater.demodulate(&modulated).unwrap();
+    let demodulated = demodulater.demodulate_signal(&modulated).unwrap();
     let bytes = bitops::bits_to_packet(&demodulated.bits, 2427).unwrap();
-
-    let bytes = bytes.1;
-
-    // println!("{:x?}", byte);
 
     assert_eq!(bytes.bytes[5], 0x10);
     assert_eq!(bytes.bytes[6..][..0x10], original_bytes);
@@ -110,7 +106,7 @@ fn pfbch_fsk_bits() {
         let catch = burst.catcher(*d);
 
         if let Some(packet) = catch {
-            let demodulated = demodulater.demodulate(packet.data).unwrap();
+            let demodulated = demodulater.demodulate(packet).unwrap();
             println!("{:?}", demodulated.bits);
 
             let mut tmp = vec![];
@@ -118,9 +114,9 @@ fn pfbch_fsk_bits() {
 
             // let bytes = bitops::bits_to_packet(&demodulated.bits, 2427).unwrap();
             let bytes = bitops::bits_to_packet(&tmp, 2427).unwrap();
-            assert_eq!(bytes.1.aa, 0xdeadbeef);
-            assert_eq!(bytes.1.bytes[5], 0x10);
-            assert_eq!(bytes.1.bytes[6..][..0x10], original_bytes);
+            assert_eq!(bytes.aa, 0xdeadbeef);
+            assert_eq!(bytes.bytes[5], 0x10);
+            assert_eq!(bytes.bytes[6..][..0x10], original_bytes);
 
             return;
         }

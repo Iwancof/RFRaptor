@@ -7,6 +7,9 @@ use bitparser::*;
 #[derive(Debug, Clone)]
 pub struct BytePacket {
     #[allow(unused)]
+    pub raw: Option<crate::fsk::Packet>,
+
+    #[allow(unused)]
     pub bytes: Vec<u8>,
     #[allow(unused)]
     pub aa: u32,
@@ -16,9 +19,21 @@ pub struct BytePacket {
     pub delta: i64,
     #[allow(unused)]
     pub offset: usize,
+
+    #[allow(unused)]
+    pub remain_bits: Vec<u8>,
 }
 
-pub fn bits_to_packet(bits: &[u8], freq: usize) -> Result<(&[u8], BytePacket)> {
+pub fn fsk_to_packet(packet: crate::fsk::Packet, freq: usize) -> Result<BytePacket> {
+    let bits = bits_to_packet(&packet.bits, freq)?;
+
+    Ok(BytePacket {
+        raw: Some(packet),
+        ..bits
+    })
+}
+
+pub fn bits_to_packet(bits: &[u8], freq: usize) -> Result<BytePacket> {
     use zerocopy::FromBytes;
 
     let bits_len = bits.len() as i64;
@@ -80,17 +95,17 @@ pub fn bits_to_packet(bits: &[u8], freq: usize) -> Result<(&[u8], BytePacket)> {
 
     let aa = *aa;
 
-    Ok((
-        remain_bits,
-        BytePacket {
-            bytes,
-            aa,
+    Ok(BytePacket {
+        raw: None,
 
-            offset,
-            delta,
-            freq,
-        },
-    ))
+        bytes,
+        aa,
+
+        offset,
+        delta,
+        freq,
+        remain_bits: remain_bits.to_vec(),
+    })
 }
 
 pub fn packet_to_bits(bytes: &[u8], freq: usize, aa: u32) -> Vec<u8> {
@@ -155,13 +170,13 @@ mod test {
             0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1,
         ];
 
-        let (remain, byte_packet) = super::bits_to_packet(&bits, 2426).unwrap();
+        let byte_packet = super::bits_to_packet(&bits, 2426).unwrap();
 
         assert_eq!(byte_packet.aa, 0x8e89bed6);
         assert_eq!(byte_packet.offset, 2);
         assert_eq!(byte_packet.delta, 6);
 
-        assert_eq!(remain.len(), byte_packet.delta as usize);
+        assert_eq!(byte_packet.remain_bits.len(), byte_packet.delta as usize);
     }
 
     #[test]
@@ -170,12 +185,12 @@ mod test {
 
         let bits = super::packet_to_bits(bytes, 2426, 0x8e89bed6);
 
-        let (remain, byte_packet) = super::bits_to_packet(&bits, 2426).unwrap();
+        let byte_packet = super::bits_to_packet(&bits, 2426).unwrap();
 
         assert_eq!(byte_packet.aa, 0x8e89bed6);
         assert_eq!(byte_packet.offset, 2);
 
         assert_eq!(byte_packet.delta, 4);
-        assert_eq!(remain.len(), 4);
+        assert_eq!(byte_packet.remain_bits.len(), 4);
     }
 }

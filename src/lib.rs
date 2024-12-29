@@ -5,3 +5,4 @@ pub mod channelizer;
 pub mod device;
 pub mod fsk;
 pub mod liquid;
+pub mod stream;

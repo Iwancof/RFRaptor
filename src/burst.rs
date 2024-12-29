@@ -94,9 +94,9 @@ pub enum SquelchStatus {
 
 use chrono::prelude::*;
 
-#[derive(Debug)]
-pub struct Packet<'a> {
-    pub data: &'a mut Vec<Complex<f32>>,
+#[derive(Debug, Clone)]
+pub struct Packet {
+    pub data: Vec<Complex<f32>>,
 
     #[allow(unused)]
     pub timestamp: DateTime<Utc>,
@@ -134,7 +134,7 @@ impl Burst {
 
                 return Some(Packet {
                     rssi_average: self.rssi_average / self.burst.len() as f32,
-                    data: &mut self.burst,
+                    data: self.burst.clone(),
                     timestamp: Utc::now(),
                 });
             }

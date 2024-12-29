@@ -1,6 +1,9 @@
 use std::ptr::NonNull;
 
-use crate::liquid::{liquid_do_int, liquid_get_pointer};
+use crate::{
+    burst,
+    liquid::{liquid_do_int, liquid_get_pointer},
+};
 
 use anyhow::Context;
 use num_complex::Complex;
@@ -34,8 +37,11 @@ pub struct FskDemod {
 }
 
 /// FSK demodulated packet
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Packet {
+    #[allow(unused)]
+    pub raw: Option<burst::Packet>,
+
     /// demodulated bits
     #[allow(unused)]
     pub bits: Vec<u8>,
@@ -115,8 +121,17 @@ impl FskDemod {
         Ok(demod)
     }
 
+    pub fn demodulate(&mut self, packet: burst::Packet) -> anyhow::Result<Packet> {
+        let demodulated = self.demodulate_signal(&packet.data)?;
+
+        Ok(Packet {
+            raw: Some(packet),
+            ..demodulated
+        })
+    }
+
     /// Demodulate the data
-    pub fn demodulate(&mut self, data: &[Complex<f32>]) -> anyhow::Result<Packet> {
+    pub fn demodulate_signal(&mut self, data: &[Complex<f32>]) -> anyhow::Result<Packet> {
         // too short to demodulate
         if data.len() < 8 + self.median_size() {
             anyhow::bail!("data is too short");
@@ -153,6 +168,7 @@ impl FskDemod {
             .collect::<Vec<u8>>();
 
         Ok(Packet {
+            raw: None,
             bits,
             demod,
             cfo,
@@ -290,7 +306,9 @@ mod tests {
     #[test]
     fn test_simple_demod() {
         let mut fsk = FskDemod::new(20e6, 20);
-        let packet = fsk.demodulate(&EXPECT_DATA_1_FREQ).expect("demod failed");
+        let packet = fsk
+            .demodulate_signal(&EXPECT_DATA_1_FREQ)
+            .expect("demod failed");
 
         // assert_eq!(packet.bits, EXPECT_DATA_1_BITS);
         let mut min = useful_number::updatable_num::UpdateToMinU32::new();
@@ -338,7 +356,9 @@ mod tests {
         println!("{:?}", modulated);
 
         let mut demodulater = FskDemod::new(20e6, 20);
-        let demodulated = demodulater.demodulate(&modulated).expect("demod failed");
+        let demodulated = demodulater
+            .demodulate_signal(&modulated)
+            .expect("demod failed");
 
         assert_eq!(packet, demodulated.bits);
     }
@@ -389,18 +409,13 @@ mod tests {
         let mut fsk = FskDemod::new(20e6, 20);
 
         for d in data.iter() {
-            let demod = fsk.demodulate(&d.0);
+            let demod = fsk.demodulate_signal(&d.0);
 
             match demod {
-                Ok(Packet {
-                    bits,
-                    demod: _,
-                    cfo: _,
-                    deviation: _,
-                }) => {
+                Ok(demod) => {
                     let expect_bits = d.1.as_ref().unwrap();
 
-                    for (a, b) in bits.iter().zip(expect_bits.iter()) {
+                    for (a, b) in demod.bits.iter().zip(expect_bits.iter()) {
                         assert_eq!(a, b);
                     }
 

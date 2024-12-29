@@ -7,13 +7,29 @@ use std::{
 };
 
 use anyhow::Context;
-use soapysdr::Device;
+use soapysdr::Device as RawDevice;
 
 use sdr::SDRConfig;
 
-mod config {
+pub struct Device {
+    pub raw: RawDevice,
+    pub config: SDRConfig,
+    pub running: std::sync::Arc<Mutex<bool>>,
+}
+
+impl Device {
+    pub fn new(raw: RawDevice, config: SDRConfig) -> Self {
+        Self {
+            raw,
+            config,
+            running: std::sync::Arc::new(Mutex::new(false)),
+        }
+    }
+}
+
+pub mod config {
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
-    pub(super) enum Device {
+    pub enum Device {
         HackRF {
             // plugin: SoapyHackRF(patched)
             // direction: "Rx" | "Tx" | "RxTx",
@@ -42,7 +58,7 @@ mod config {
     }
 
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
-    pub(super) struct List {
+    pub struct List {
         pub devices: Vec<Device>,
     }
 }
@@ -61,12 +77,7 @@ static INTERNAL_DEVICE_INFO: LazyLock<HashMap<&str, (&str, &str)>> = LazyLock::n
 
 const NUM_CHANNELS: usize = 16usize;
 
-pub static SDR_RX_CONFIGS: LazyLock<Mutex<HashMap<usize, SDRConfig>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-pub static SDR_TX_CONFIGS: LazyLock<Mutex<HashMap<usize, SDRConfig>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn open_hackrf(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> anyhow::Result<()> {
+fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
     let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("hackrf").unwrap();
     let config::Device::HackRF {
         direction,
@@ -84,7 +95,7 @@ fn open_hackrf(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> 
         serial
     );
 
-    let dev = soapysdr::Device::new(format!("driver={},serial={}", driver, serial).as_str())
+    let dev = RawDevice::new(format!("driver={},serial={}", driver, serial).as_str())
         .context("failed to open device")?;
 
     let sdr_config = SDRConfig {
@@ -100,37 +111,16 @@ fn open_hackrf(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> 
     sdr_config.set(&dev)?;
 
     match direction.as_str() {
-        "Rx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev);
-            SDR_RX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "Tx" => {
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "RxTx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev.clone());
-            SDR_RX_CONFIGS
-                .lock()
-                .unwrap()
-                .insert(idx, sdr_config.clone());
-
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        _ => return Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    };
-
-    Ok(())
+        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
+        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
+        "RxTx" => Ok((
+            Some(Device::new(dev.clone(), sdr_config.clone())),
+            Some(Device::new(dev, sdr_config)),
+        )),
+        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
+    }
 }
-fn open_virtual(
-    config: config::Device,
-    ret: &mut (Vec<Device>, Vec<Device>),
-) -> anyhow::Result<()> {
+fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
     let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("virtual").unwrap();
     let config::Device::Virtual { direction } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
@@ -138,8 +128,8 @@ fn open_virtual(
 
     log::trace!("driver: {}, plugin_path: {}", driver, plugin_path);
 
-    let dev = soapysdr::Device::new(format!("driver={}", driver).as_str())
-        .context("failed to open device")?;
+    let dev =
+        RawDevice::new(format!("driver={}", driver).as_str()).context("failed to open device")?;
 
     let sdr_config = SDRConfig {
         channels: 0,
@@ -152,34 +142,16 @@ fn open_virtual(
     };
 
     match direction.as_str() {
-        "Rx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev);
-            SDR_RX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "Tx" => {
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "RxTx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev.clone());
-            SDR_RX_CONFIGS
-                .lock()
-                .unwrap()
-                .insert(idx, sdr_config.clone());
-
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        _ => return Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    };
-
-    Ok(())
+        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
+        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
+        "RxTx" => Ok((
+            Some(Device::new(dev.clone(), sdr_config.clone())),
+            Some(Device::new(dev, sdr_config)),
+        )),
+        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
+    }
 }
-fn open_file(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> anyhow::Result<()> {
+fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
     let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("file").unwrap();
     let config::Device::File { direction, path } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
@@ -187,7 +159,7 @@ fn open_file(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> an
 
     log::trace!("driver: {}, plugin_path: {}", driver, plugin_path);
 
-    let dev = soapysdr::Device::new(format!("driver={},path={}", driver, path).as_str())
+    let dev = RawDevice::new(format!("driver={},path={}", driver, path).as_str())
         .context("failed to open device")?;
 
     let sdr_config = SDRConfig {
@@ -201,32 +173,14 @@ fn open_file(config: config::Device, ret: &mut (Vec<Device>, Vec<Device>)) -> an
     };
 
     match direction.as_str() {
-        "Rx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev);
-            SDR_RX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "Tx" => {
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        "RxTx" => {
-            let idx = ret.0.len();
-            ret.0.push(dev.clone());
-            SDR_RX_CONFIGS
-                .lock()
-                .unwrap()
-                .insert(idx, sdr_config.clone());
-
-            let idx = ret.1.len();
-            ret.1.push(dev);
-            SDR_TX_CONFIGS.lock().unwrap().insert(idx, sdr_config);
-        }
-        _ => return Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    };
-
-    Ok(())
+        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
+        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
+        "RxTx" => Ok((
+            Some(Device::new(dev.clone(), sdr_config.clone())),
+            Some(Device::new(dev, sdr_config)),
+        )),
+        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
+    }
 }
 
 fn append_plugin_path() {
@@ -248,26 +202,22 @@ fn append_plugin_path() {
 }
 
 // return (rx stream, tx stream)
-pub fn open_device(config_path: String) -> anyhow::Result<(Vec<Device>, Vec<Device>)> {
+pub fn open_device(config: config::List) -> anyhow::Result<(Vec<Device>, Vec<Device>)> {
     append_plugin_path();
-
-    let file = std::fs::File::open(config_path)?;
-
-    let config: config::List = serde_yaml::from_reader(file).context("failed to parse config")?;
-    // println!("{:?}", config);
 
     let mut ret = (vec![], vec![]);
     for dev_conf in config.devices {
-        match dev_conf {
-            config::Device::HackRF { .. } => {
-                open_hackrf(dev_conf, &mut ret)?;
-            }
-            config::Device::Virtual { .. } => {
-                open_virtual(dev_conf, &mut ret)?;
-            }
-            config::Device::File { .. } => {
-                open_file(dev_conf, &mut ret)?;
-            }
+        let (rx, tx) = match dev_conf {
+            config::Device::HackRF { .. } => open_hackrf(dev_conf)?,
+            config::Device::Virtual { .. } => open_virtual(dev_conf)?,
+            config::Device::File { .. } => open_file(dev_conf)?,
+        };
+
+        if let Some(rx) = rx {
+            ret.0.push(rx);
+        }
+        if let Some(tx) = tx {
+            ret.1.push(tx);
         }
     }
 
