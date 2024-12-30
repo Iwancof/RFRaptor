@@ -247,7 +247,7 @@ impl crate::device::Device {
 
         let (sdridx_to_sender, blch_to_receiver) = self.prepare_pfbch2_fsk_mpsc();
 
-        self.wake_channelizer(sdridx_to_sender, |_e| println!("{:?}", _e))?;
+        self.wake_channelizer(sdridx_to_sender, |_e| {})?;
         self.catch_and_process(
             blch_to_receiver,
             move |packet| packet_sink.send(packet).unwrap(),
