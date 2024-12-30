@@ -57,13 +57,17 @@ fn main() -> anyhow::Result<()> {
 
         match r {
             StreamResult::Packet(p) => {
-                if let crate::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
-                    log::info!("{}", p.bytes_packet.raw.unwrap().raw.unwrap().rssi_average);
-                    log::info!("{}", adv);
-                }
+                log::info!("Packet: {:x?}", p.packet);
+                log::info!("freq: {}", p.bytes_packet.freq);
+
+                // if let crate::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
+                //     log::info!("{}", p.bytes_packet.raw.unwrap().raw.unwrap().rssi_average);
+                //     log::info!("{}", adv);
+                // }
             }
             StreamResult::Error(e) => {
                 log::error!("Error: {}", e);
+                break;
             }
             StreamResult::ProcessFail(ProcessFailKind::Demod(_)) => {
                 demod_counter += 1;

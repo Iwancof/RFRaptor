@@ -250,7 +250,9 @@ impl crate::device::Device {
         self.wake_channelizer(sdridx_to_sender, |_e| {})?;
         self.catch_and_process(
             blch_to_receiver,
-            move |packet| packet_sink.send(packet).unwrap(),
+            move |packet| {
+                let _ = packet_sink.send(packet);
+            },
             |_fail| {},
             |_e| {},
         )?;
@@ -271,7 +273,7 @@ impl crate::device::Device {
         let ps1 = packet_sink.clone();
 
         self.wake_channelizer(sdridx_to_sender, move |e| {
-            ps1.send(StreamResult::Error(e)).unwrap()
+            let _ = ps1.send(StreamResult::Error(e));
         })?;
 
         let ps2 = packet_sink.clone();
@@ -280,9 +282,15 @@ impl crate::device::Device {
 
         self.catch_and_process(
             blch_to_receiver,
-            move |packet| ps2.send(StreamResult::Packet(Box::new(packet))).unwrap(),
-            move |fail| ps3.send(StreamResult::ProcessFail(fail)).unwrap(),
-            move |e| ps4.send(StreamResult::Error(e)).unwrap(),
+            move |packet| {
+                let _ = ps2.send(StreamResult::Packet(Box::new(packet)));
+            },
+            move |fail| {
+                let _ = ps3.send(StreamResult::ProcessFail(fail));
+            },
+            move |e| {
+                let _ = ps4.send(StreamResult::Error(e));
+            },
         )?;
 
         Ok(RxStream {
