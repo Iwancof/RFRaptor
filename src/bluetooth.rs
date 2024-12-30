@@ -5,7 +5,7 @@ use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 use crate::bitops::BytePacket;
 
 // TODO: いい感じに実装する
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Bluetooth {
     pub bytes_packet: BytePacket,
 
@@ -27,7 +27,7 @@ pub enum DecodeError {
     PacketNotFound,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BluetoothPacket {
     pub inner: PacketInner,
 
@@ -35,13 +35,13 @@ pub struct BluetoothPacket {
     pub crc: [u8; 3],
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum PacketInner {
     Advertisement(Advertisement),
     Unimplemented(u32),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Advertisement {
     pub pdu_header: PDUHeader,
     pub length: u8,
@@ -49,12 +49,12 @@ pub struct Advertisement {
     pub data: Vec<AdvData>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MacAddress {
     pub address: [u8; 6],
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum PDUType {
     AdvInd,
     AdvDirectInd,
@@ -66,7 +66,7 @@ pub enum PDUType {
     Unknown(u8),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PDUHeader {
     pdu_type: PDUType,
     rfu: bool,
@@ -75,7 +75,7 @@ pub struct PDUHeader {
     rx_add: bool,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AdvData {
     len: u8,
     data: Vec<u8>,

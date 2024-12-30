@@ -367,7 +367,7 @@ mod tests {
     fn compatible_data_test() {
         use std::io::BufRead;
 
-        let file = std::fs::File::open("./fsk_debug.txt").expect("file open failed");
+        let file = std::fs::File::open("tests/fsk_debug.txt").expect("file open failed");
         let reader = std::io::BufReader::new(file);
         let mut lines = reader.lines();
 

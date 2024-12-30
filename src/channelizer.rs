@@ -18,6 +18,8 @@ pub struct Channelizer {
     // len(working_buffer) = num_channels
 }
 
+unsafe impl Send for Channelizer {}
+
 pub struct Synthesizer {
     num_channels: usize,
 
@@ -119,10 +121,10 @@ impl core::fmt::Display for Channelizer {
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- analyser: {:p}", self.analyzer)?;
 
-        writeln!(f, "- firpfbch2_crcf_print")?;
-
         #[cfg(feature = "capture_stdout")]
         {
+            writeln!(f, "- firpfbch2_crcf_print")?;
+
             use wrcap::lent_stdout;
 
             let ((), content) = lent_stdout()
@@ -155,10 +157,10 @@ impl core::fmt::Display for Synthesizer {
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- synthesizer: {:p}", self.synthesizer)?;
 
-        writeln!(f, "- firpfbch2_crcf_print")?;
-
         #[cfg(feature = "capture_stdout")]
         {
+            writeln!(f, "- firpfbch2_crcf_print")?;
+
             use wrcap::lent_stdout;
 
             let ((), content) = lent_stdout()

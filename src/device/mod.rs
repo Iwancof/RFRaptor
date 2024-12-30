@@ -1,10 +1,6 @@
 pub mod sdr;
 
-use std::{
-    collections::HashMap,
-    path::Path,
-    sync::{LazyLock, Mutex},
-};
+use std::{path::Path, sync::Mutex};
 
 use anyhow::Context;
 use soapysdr::Device as RawDevice;
@@ -63,22 +59,11 @@ pub mod config {
     }
 }
 
-static INTERNAL_DEVICE_INFO: LazyLock<HashMap<&str, (&str, &str)>> = LazyLock::new(|| {
-    // [driver_name] => (driver_name, plugin_path)
-
-    let mut hm = HashMap::new();
-
-    hm.insert("hackrf", ("hackrf", "SoapyHackRF"));
-    hm.insert("virtual", ("virtual", "soapy-utils/soapy-virtual"));
-    hm.insert("file", ("file", "soapy-utils/soapy-file"));
-
-    hm
-});
-
 const NUM_CHANNELS: usize = 16usize;
 
 fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
-    let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("hackrf").unwrap();
+    let driver = "hackrf";
+
     let config::Device::HackRF {
         direction,
         freq_mhz,
@@ -88,12 +73,7 @@ fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option
         return Err(anyhow::anyhow!("Invalid config"));
     };
 
-    log::trace!(
-        "driver: {}, plugin_path: {}, serial: {}",
-        driver,
-        plugin_path,
-        serial
-    );
+    log::trace!("driver: {}, serial: {}", driver, serial);
 
     let dev = RawDevice::new(format!("driver={},serial={}", driver, serial).as_str())
         .context("failed to open device")?;
@@ -121,12 +101,13 @@ fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option
     }
 }
 fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
-    let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("virtual").unwrap();
+    let driver = "virtual";
+
     let config::Device::Virtual { direction } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
     };
 
-    log::trace!("driver: {}, plugin_path: {}", driver, plugin_path);
+    log::trace!("driver: {}", driver);
 
     let dev =
         RawDevice::new(format!("driver={}", driver).as_str()).context("failed to open device")?;
@@ -152,12 +133,13 @@ fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Optio
     }
 }
 fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
-    let (driver, plugin_path) = INTERNAL_DEVICE_INFO.get("file").unwrap();
+    let driver = "file";
+
     let config::Device::File { direction, path } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
     };
 
-    log::trace!("driver: {}, plugin_path: {}", driver, plugin_path);
+    log::trace!("driver: {}", driver);
 
     let dev = RawDevice::new(format!("driver={},path={}", driver, path).as_str())
         .context("failed to open device")?;
@@ -183,27 +165,13 @@ fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<D
     }
 }
 
-fn append_plugin_path() {
-    let base = Path::new(env!("OUT_DIR"));
-
-    for (key, (_driver, plugin_path)) in INTERNAL_DEVICE_INFO.iter() {
-        log::trace!(
-            "appending plugin... (key: {}, plugin_path: {})",
-            key,
-            plugin_path
-        );
-
-        let current = std::env::var("SOAPY_SDR_PLUGIN_PATH").unwrap_or_default();
-        std::env::set_var(
-            "SOAPY_SDR_PLUGIN_PATH",
-            format!("{}:{}", current, base.join(plugin_path).display()),
-        );
-    }
-}
-
 // return (rx stream, tx stream)
 pub fn open_device(config: config::List) -> anyhow::Result<(Vec<Device>, Vec<Device>)> {
-    append_plugin_path();
+    let base = Path::new(env!("OUT_DIR"));
+    std::env::set_var(
+        "SOAPY_SDR_PLUGIN_PATH",
+        base.join("lib/SoapySDR/modules0.8").display().to_string(),
+    );
 
     let mut ret = (vec![], vec![]);
     for dev_conf in config.devices {

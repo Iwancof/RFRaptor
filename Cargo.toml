@@ -13,9 +13,9 @@ panic = "abort"
 
 [dependencies]
 anyhow = { version = "1.0.86", features = ["backtrace"] }
-az = "1.2.1"
 chrono = "0.4.38"
 clap = { version = "4.5.23", features = ["derive", "string"] }
+ctrlc = "3.4.5"
 env_logger = "0.11.5"
 libbtbb-sys = { version = "0.1.0", path = "../../../Rust/libbtbb-sys" }
 # liquid-dsp-sys = { version = "0.1.0", features = ["num-complex"] }
@@ -27,20 +27,15 @@ num-complex = "0.4.6"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
 regex = "1.11.1"
-rustfft = "6.2.0"
 serde = { version = "1.0.210", features = ["derive"] }
-serde_json = "1.0.132"
 serde_yaml = "0.9.34"
-signalbool = "0.2.5"
 soapysdr = { version = "0.4.0", features = ["log"] }
 thread-priority = "1.1.0"
-tungstenite = "0.24.0"
 useful_number = "0.1.2"
 wrcap = { version = "0.1.0", path = "../../../Rust/wrcap", optional = true }
 zerocopy = "0.8.9"
 
 [dev-dependencies]
-approx = { version = "0.5.1", features = ["num-complex"] }
 rand = { version = "0.8.5", features = ["small_rng"] }
 
 [features]

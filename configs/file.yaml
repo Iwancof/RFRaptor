@@ -1,7 +1,7 @@
 devices:
 - !File
   direction: Rx
-  path: ./sample.txt
+  path: ./test_sample_rx.txt
 - !File
   direction: Tx
   path: ./tx_out.txt

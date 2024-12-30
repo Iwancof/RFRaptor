@@ -4,6 +4,7 @@ use clap::Parser;
 
 use anyhow::Context;
 
+use stream::ProcessFailKind;
 #[allow(unused_imports)] // use with permission
 use thread_priority::{set_current_thread_priority, ThreadPriority};
 
@@ -33,7 +34,12 @@ fn main() -> anyhow::Result<()> {
     let (mut rx, tx) = device::open_device(config)?;
     println!("rx.len() = {}, tx.len() = {}", rx.len(), tx.len());
 
-    let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT], signalbool::Flag::Restart)?;
+    let stop_signal = rx[0].running.clone();
+    ctrlc::set_handler(move || {
+        *stop_signal.lock().unwrap() = false;
+    })?;
+
+    /*
     for packet in rx[0].start_rx()? {
         if let crate::bluetooth::PacketInner::Advertisement(ref adv) = packet.packet.inner {
             log::info!(
@@ -42,11 +48,31 @@ fn main() -> anyhow::Result<()> {
             );
             log::info!("{}", adv);
         }
+    }
+    */
 
-        if sb.caught() {
-            break;
+    let mut demod_counter = 0;
+    for r in rx[0].start_rx_with_error()? {
+        use stream::StreamResult;
+
+        match r {
+            StreamResult::Packet(p) => {
+                if let crate::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
+                    log::info!("{}", p.bytes_packet.raw.unwrap().raw.unwrap().rssi_average);
+                    log::info!("{}", adv);
+                }
+            }
+            StreamResult::Error(e) => {
+                log::error!("Error: {}", e);
+            }
+            StreamResult::ProcessFail(ProcessFailKind::Demod(_)) => {
+                demod_counter += 1;
+            }
+            StreamResult::ProcessFail(_kind) => {}
         }
     }
+
+    println!("done, demod_counter = {}", demod_counter);
 
     *rx[0].running.lock().unwrap() = false;
 

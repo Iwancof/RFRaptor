@@ -9,4 +9,3 @@ pub use num_complex::Complex32 as liquid_float_complex;
 pub use num_complex::Complex64 as liquid_double_complex;
 
 include!(concat!(env!("OUT_DIR"), "/liquid.rs"));
-
