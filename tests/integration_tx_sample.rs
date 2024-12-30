@@ -74,7 +74,7 @@ fn pfbch_fsk_bits() {
         .chain(
             Wave {
                 idx: 100,
-                gamma: 0.0025,
+                gamma: 0.0035,
             }
             .take(16),
         )
