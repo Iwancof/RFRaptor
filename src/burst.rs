@@ -11,10 +11,15 @@ pub struct Agc {
     crcf_s: std::ptr::NonNull<liquid_dsp_sys::agc_crcf_s>,
 }
 
-const AGC_THRESHOLD: f32 = -30.; // depends on the implementation of channelizer
-
 impl Agc {
     pub fn new() -> Self {
+        let agc_threshold = std::env::var("AGC_THRESHOLD")
+            .unwrap_or_else(|_| "-27".to_string())
+            .parse()
+            .expect("AGC_THRESHOLD");
+
+        log::info!("AGC_THRESHOLD: {}", agc_threshold);
+
         use liquid_dsp_sys::*;
         let crcf = unsafe {
             let obj = liquid_get_pointer(|| agc_crcf_create()).expect("agc_crcf_create");
@@ -25,8 +30,9 @@ impl Agc {
 
             liquid_do_int(|| agc_crcf_squelch_enable(obj.as_ptr()))
                 .expect("agc_crcf_squelch_enable");
-            liquid_do_int(|| agc_crcf_squelch_set_threshold(obj.as_ptr(), AGC_THRESHOLD))
+            liquid_do_int(|| agc_crcf_squelch_set_threshold(obj.as_ptr(), agc_threshold))
                 .expect("agc_crcf_squelch_set_threshold");
+
             liquid_do_int(|| agc_crcf_squelch_set_timeout(obj.as_ptr(), 100))
                 .expect("agc_crcf_squelch_set_timeout");
 
