@@ -17,7 +17,7 @@ chrono = "0.4.38"
 clap = { version = "4.5.23", features = ["derive", "string"] }
 ctrlc = "3.4.5"
 env_logger = "0.11.5"
-libbtbb-sys = { version = "0.1.0", path = "../../../Rust/libbtbb-sys" }
+libbtbb-sys = { version = "0.1.0", path = "./libbtbb-sys" }
 # liquid-dsp-sys = { version = "0.1.0", features = ["num-complex"] }
 liquid-dsp-sys = { path = "./liquid-dsp-sys", features = ["num-complex"] }
 log = "0.4.22"
