@@ -1,8 +1,8 @@
 use std::env;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=liquid-dsp/libliquid.a");
+    println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=liquid-dsp/libliquid.a");
 
     /*
     std::process::Command::new("sh")
@@ -34,8 +34,8 @@ fn main() {
         .expect("Couldn't write bindings!");
 
     // add library search path
-    println!("cargo:rustc-link-search=native={}/liquid-dsp", crate_dir);
+    println!("cargo::rustc-link-search=native={}/liquid-dsp", crate_dir);
 
-    println!("cargo:rustc-link-lib=static=liquid");
-    println!("cargo:rustc-link-lib=dylib=fftw3f");
+    println!("cargo::rustc-link-lib=static=liquid");
+    println!("cargo::rustc-link-lib=dylib=fftw3f");
 }

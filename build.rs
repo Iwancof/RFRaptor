@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=build.rs");
 
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
@@ -33,7 +33,7 @@ fn main() {
 
         let project_dir = format!("{}/{}", manifest_dir, project);
 
-        println!("cargo:rerun-if-changed={}", project_dir);
+        println!("cargo::rerun-if-changed={}", project_dir);
 
         // let status = Command::new("cmake")
         //     .args(["-S", &project_dir, "-B", &build_dir, "-DCMAKE_BUILD_TYPE=", build_type])

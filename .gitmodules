@@ -4,3 +4,6 @@
 [submodule "soapy-utils"]
 	path = soapy-utils
 	url = git@github.com:Iwancof/soapy-utils.git
+[submodule "libbtbb-sys/libbtbb"]
+	path = libbtbb-sys/libbtbb
+	url = https://github.com/greatscottgadgets/libbtbb.git

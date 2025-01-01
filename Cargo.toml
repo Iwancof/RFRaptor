@@ -5,6 +5,7 @@ edition = "2021"
 
 default-run = "hydro-strike"
 
+
 [profile.release]
 debug = 2
 # lto = "fat"
