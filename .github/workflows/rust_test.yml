@@ -18,6 +18,11 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Install SoapySDR
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y soapysdr-tools libsoapysdr-dev
+
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -28,11 +33,6 @@ jobs:
           ~/.cargo/git/db/
           target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install SoapySDR
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y soapysdr-tools libsoapysdr-dev
 
     - name: Build test
       run: cargo build --release --verbose
