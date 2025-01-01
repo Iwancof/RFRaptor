@@ -27,7 +27,8 @@ jobs:
           soapysdr-tools \
           libsoapysdr-dev \
           hackrf \
-          libhackrf-dev
+          libhackrf-dev \
+          libfftw3-dev
 
     - name: Cache cargo registry
       uses: actions/cache@v4
