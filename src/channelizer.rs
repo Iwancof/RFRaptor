@@ -121,23 +121,6 @@ impl core::fmt::Display for Channelizer {
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- analyser: {:p}", self.analyzer)?;
 
-        #[cfg(feature = "capture_stdout")]
-        {
-            writeln!(f, "- firpfbch2_crcf_print")?;
-
-            use wrcap::lent_stdout;
-
-            let ((), content) = lent_stdout()
-                .unwrap()
-                .capture_string(|| {
-                    unsafe {
-                        liquid_dsp_sys::firpfbch2_crcf_print(self.analyzer.as_ptr());
-                    };
-                })
-                .unwrap();
-            write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
-        }
-
         Ok(())
     }
 }
@@ -156,23 +139,6 @@ impl core::fmt::Display for Synthesizer {
         writeln!(f, "Synthesizer")?;
         writeln!(f, "- num_channels: {}", self.num_channels)?;
         writeln!(f, "- synthesizer: {:p}", self.synthesizer)?;
-
-        #[cfg(feature = "capture_stdout")]
-        {
-            writeln!(f, "- firpfbch2_crcf_print")?;
-
-            use wrcap::lent_stdout;
-
-            let ((), content) = lent_stdout()
-                .unwrap()
-                .capture_string(|| {
-                    unsafe {
-                        liquid_dsp_sys::firpfbch2_crcf_print(self.synthesizer.as_ptr());
-                    };
-                })
-                .unwrap();
-            write!(f, "  - {}", content.strip_suffix("\n").unwrap())?;
-        }
 
         Ok(())
     }
