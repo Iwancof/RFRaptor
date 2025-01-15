@@ -40,6 +40,10 @@ pub enum ProcessFailKind {
     Bluetooth,
 }
 
+pub trait Stream {
+    fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>>;
+}
+
 impl crate::device::Device {
     fn prepare_pfbch2_fsk_mpsc(
         &self,
@@ -104,8 +108,9 @@ impl crate::device::Device {
             "buffers=65535",
         )?;
 
+        // let mut channelizer = crate::channelizer::Channelizer::new(config.num_channels, 4, 0.75);
         let mut channelizer = crate::channelizer::Channelizer::new(config.num_channels);
-        log::trace!("wake_channelizer\n{}", channelizer);
+        // log::trace!("wake_channelizer\n{}", channelizer);
 
         let mut fft_result: Vec<Vec<num_complex::Complex<f32>>> = (0..config.num_channels)
             .map(|_| Vec::with_capacity(131072 / (config.num_channels / 2)))
@@ -114,52 +119,55 @@ impl crate::device::Device {
         let mut buffer =
             vec![num_complex::Complex::default(); read_stream.mtu()?].into_boxed_slice();
 
-        std::thread::spawn(move || {
-            if let Err(e) = read_stream.activate(None) {
-                on_error(e.into());
-                return;
-            }
-
-            let ret: anyhow::Result<()> = (|| loop {
-                let _read = read_stream
-                    .read(&mut [&mut buffer[..]], 1_000_000)
-                    .context("wake_channelizer(read)")?;
-
-                Self::check_remain_count(&raw)?;
-
-                for fft in fft_result.iter_mut() {
-                    fft.clear();
+        // std::thread::spawn(move || {
+        let _ = std::thread::Builder::new()
+            .name("wake_channelizer".to_string())
+            .spawn(move || {
+                if let Err(e) = read_stream.activate(None) {
+                    on_error(e.into());
+                    return;
                 }
 
-                for chunk in buffer.chunks_exact_mut(config.num_channels / 2) {
-                    for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
-                        if sdridx_to_sender.contains_key(&SdrIdx(sdridx)) {
-                            fft_result[sdridx].push(*fft);
+                let ret: anyhow::Result<()> = (|| loop {
+                    let _read = read_stream
+                        .read(&mut [&mut buffer[..]], 1_000_000)
+                        .context("wake_channelizer(read)")?;
+
+                    Self::check_remain_count(&raw)?;
+
+                    for fft in fft_result.iter_mut() {
+                        fft.clear();
+                    }
+
+                    for chunk in buffer.chunks_exact_mut(config.num_channels / 2) {
+                        for (sdridx, fft) in channelizer.channelize(chunk).iter().enumerate() {
+                            if sdridx_to_sender.contains_key(&SdrIdx(sdridx)) {
+                                fft_result[sdridx].push(*fft);
+                            }
                         }
                     }
-                }
 
-                for (sdridx, fft) in fft_result.iter().enumerate() {
-                    if let Some((_blch, tx)) = sdridx_to_sender.get(&SdrIdx(sdridx)) {
-                        tx.send(fft.clone()).context("wake_channelizer(send)")?;
+                    for (sdridx, fft) in fft_result.iter().enumerate() {
+                        if let Some((_blch, tx)) = sdridx_to_sender.get(&SdrIdx(sdridx)) {
+                            tx.send(fft.clone()).context("wake_channelizer(send)")?;
+                        }
                     }
+
+                    if !*running.lock().expect("failed to lock") {
+                        anyhow::bail!("Interrupted");
+                    }
+                })();
+
+                *running.lock().expect("failed to lock") = false;
+
+                if let Err(e) = read_stream.deactivate(None) {
+                    on_error(e.into());
                 }
 
-                if !*running.lock().expect("failed to lock") {
-                    anyhow::bail!("Interrupted");
+                if let Err(e) = ret {
+                    on_error(e);
                 }
-            })();
-
-            *running.lock().expect("failed to lock") = false;
-
-            if let Err(e) = read_stream.deactivate(None) {
-                on_error(e.into());
-            }
-
-            if let Err(e) = ret {
-                on_error(e);
-            }
-        });
+            });
 
         Ok(())
     }
@@ -239,29 +247,6 @@ impl crate::device::Device {
         Ok(())
     }
 
-    pub fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>> {
-        // sink/source Bluetooth Packet
-
-        let (packet_sink, packet_source) = std::sync::mpsc::channel();
-        *self.running.lock().expect("failed to lock") = true;
-
-        let (sdridx_to_sender, blch_to_receiver) = self.prepare_pfbch2_fsk_mpsc();
-
-        self.wake_channelizer(sdridx_to_sender, |_e| {})?;
-        self.catch_and_process(
-            blch_to_receiver,
-            move |packet| {
-                let _ = packet_sink.send(packet);
-            },
-            |_fail| {},
-            |_e| {},
-        )?;
-
-        Ok(RxStream {
-            source: packet_source,
-        })
-    }
-
     pub fn start_rx_with_error(&mut self) -> anyhow::Result<RxStream<StreamResult>> {
         // sink/source Bluetooth Packet
 
@@ -291,6 +276,31 @@ impl crate::device::Device {
             move |e| {
                 let _ = ps4.send(StreamResult::Error(e));
             },
+        )?;
+
+        Ok(RxStream {
+            source: packet_source,
+        })
+    }
+}
+
+impl Stream for crate::device::Device {
+    fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>> {
+        // sink/source Bluetooth Packet
+
+        let (packet_sink, packet_source) = std::sync::mpsc::channel();
+        *self.running.lock().expect("failed to lock") = true;
+
+        let (sdridx_to_sender, blch_to_receiver) = self.prepare_pfbch2_fsk_mpsc();
+
+        self.wake_channelizer(sdridx_to_sender, |_e| {})?;
+        self.catch_and_process(
+            blch_to_receiver,
+            move |packet| {
+                let _ = packet_sink.send(packet);
+            },
+            |_fail| {},
+            |_e| {},
         )?;
 
         Ok(RxStream {

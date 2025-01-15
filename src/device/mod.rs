@@ -3,7 +3,7 @@ pub mod sdr;
 use std::{path::Path, sync::Mutex};
 
 use anyhow::Context;
-use soapysdr::Device as RawDevice;
+use soapysdr::{Device as RawDevice, Direction};
 
 use sdr::SDRConfig;
 
@@ -59,9 +59,18 @@ pub mod config {
     }
 }
 
+fn direction_from_str(s: &str) -> anyhow::Result<Vec<Direction>> {
+    match s {
+        "Rx" => Ok(vec![Direction::Rx]),
+        "Tx" => Ok(vec![Direction::Tx]),
+        "RxTx" => Ok(vec![Direction::Rx, Direction::Tx]),
+        _ => Err(anyhow::anyhow!("Invalid direction")),
+    }
+}
+
 const NUM_CHANNELS: usize = 16usize;
 
-fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
+fn open_hackrf(config: config::Device) -> anyhow::Result<Device> {
     let driver = "hackrf";
 
     let config::Device::HackRF {
@@ -73,39 +82,42 @@ fn open_hackrf(config: config::Device) -> anyhow::Result<(Option<Device>, Option
         return Err(anyhow::anyhow!("Invalid config"));
     };
 
+    let directions = direction_from_str(direction.as_str())?;
+
     log::trace!("driver: {}, serial: {}", driver, serial);
 
     let dev = RawDevice::new(format!("driver={},serial={}", driver, serial).as_str())
         .context("failed to open device")?;
 
     let sdr_config = SDRConfig {
+        driver: driver.to_string(),
         channels: 0,
         num_channels: NUM_CHANNELS,
         center_freq: freq_mhz as f64 * 1.0e6,
         freq_mhz,
         sample_rate: NUM_CHANNELS as f64 * 1.0e6,
         bandwidth: NUM_CHANNELS as f64 * 1.0e6,
-        gain: 64.,
+        gain: if directions.contains(&Direction::Tx) {
+            32. + 14.
+        } else {
+            64.
+        },
+        directions,
+        // FIXME: separate rx/tx gain
     };
 
     sdr_config.set(&dev)?;
 
-    match direction.as_str() {
-        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
-        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
-        "RxTx" => Ok((
-            Some(Device::new(dev.clone(), sdr_config.clone())),
-            Some(Device::new(dev, sdr_config)),
-        )),
-        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    }
+    Ok(Device::new(dev, sdr_config))
 }
-fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
+fn open_virtual(config: config::Device) -> anyhow::Result<Device> {
     let driver = "virtual";
 
     let config::Device::Virtual { direction } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
     };
+
+    let directions = direction_from_str(direction.as_str())?;
 
     log::trace!("driver: {}", driver);
 
@@ -113,6 +125,8 @@ fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Optio
         RawDevice::new(format!("driver={}", driver).as_str()).context("failed to open device")?;
 
     let sdr_config = SDRConfig {
+        driver: driver.to_string(),
+        directions,
         channels: 0,
         num_channels: NUM_CHANNELS,
         center_freq: 2427e6, // (TODO: add freqency to config)
@@ -122,22 +136,18 @@ fn open_virtual(config: config::Device) -> anyhow::Result<(Option<Device>, Optio
         gain: 64.,
     };
 
-    match direction.as_str() {
-        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
-        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
-        "RxTx" => Ok((
-            Some(Device::new(dev.clone(), sdr_config.clone())),
-            Some(Device::new(dev, sdr_config)),
-        )),
-        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    }
+    sdr_config.set(&dev)?;
+
+    Ok(Device::new(dev, sdr_config))
 }
-fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<Device>)> {
+fn open_file(config: config::Device) -> anyhow::Result<Device> {
     let driver = "file";
 
     let config::Device::File { direction, path } = config else {
         return Err(anyhow::anyhow!("Invalid config"));
     };
+
+    let directions = direction_from_str(direction.as_str())?;
 
     log::trace!("driver: {}", driver);
 
@@ -145,6 +155,8 @@ fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<D
         .context("failed to open device")?;
 
     let sdr_config = SDRConfig {
+        driver: driver.to_string(),
+        directions,
         channels: 0,
         num_channels: NUM_CHANNELS,
         center_freq: 2427e6, // (TODO: add freqency to config)
@@ -154,39 +166,27 @@ fn open_file(config: config::Device) -> anyhow::Result<(Option<Device>, Option<D
         gain: 64.,
     };
 
-    match direction.as_str() {
-        "Rx" => Ok((Some(Device::new(dev, sdr_config)), None)),
-        "Tx" => Ok((None, Some(Device::new(dev, sdr_config)))),
-        "RxTx" => Ok((
-            Some(Device::new(dev.clone(), sdr_config.clone())),
-            Some(Device::new(dev, sdr_config)),
-        )),
-        _ => Err(anyhow::anyhow!("Invalid direction (Rx/Tx)")),
-    }
+    sdr_config.set(&dev)?;
+
+    Ok(Device::new(dev, sdr_config))
 }
 
 // return (rx stream, tx stream)
-pub fn open_device(config: config::List) -> anyhow::Result<(Vec<Device>, Vec<Device>)> {
+pub fn open_device(config: config::List) -> anyhow::Result<Vec<Device>> {
     let base = Path::new(env!("OUT_DIR"));
-    std::env::set_var(
-        "SOAPY_SDR_PLUGIN_PATH",
-        base.join("lib/SoapySDR/modules0.8").display().to_string(),
-    );
+    let module_path = base.join("lib/SoapySDR/modules0.8");
+    log::trace!("module_path: {}", module_path.display());
+    std::env::set_var("SOAPY_SDR_PLUGIN_PATH", module_path.display().to_string());
 
-    let mut ret = (vec![], vec![]);
+    let mut ret = Vec::new();
     for dev_conf in config.devices {
-        let (rx, tx) = match dev_conf {
+        let dev = match dev_conf {
             config::Device::HackRF { .. } => open_hackrf(dev_conf)?,
             config::Device::Virtual { .. } => open_virtual(dev_conf)?,
             config::Device::File { .. } => open_file(dev_conf)?,
         };
 
-        if let Some(rx) = rx {
-            ret.0.push(rx);
-        }
-        if let Some(tx) = tx {
-            ret.1.push(tx);
-        }
+        ret.push(dev);
     }
 
     Ok(ret)

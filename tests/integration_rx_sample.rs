@@ -1,4 +1,5 @@
 use hydro_strike::*;
+use hydro_strike::stream::Stream;
 
 #[test]
 fn test_sample_rx() {
@@ -15,7 +16,7 @@ fn test_sample_rx() {
         }],
     };
 
-    let (mut rx, _tx) = device::open_device(config).expect("Failed to open device");
+    let mut rx = device::open_device(config).expect("Failed to open device");
 
     let packets: Vec<hydro_strike::bluetooth::Bluetooth> =
         rx[0].start_rx().expect("Failed to start rx").collect();

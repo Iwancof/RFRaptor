@@ -14,6 +14,7 @@ panic = "abort"
 
 [dependencies]
 anyhow = { version = "1.0.86", features = ["backtrace"] }
+az = "1.2.1"
 chrono = "0.4.38"
 clap = { version = "4.5.23", features = ["derive", "string"] }
 ctrlc = "3.4.5"
@@ -28,6 +29,7 @@ num-complex = "0.4.6"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
 regex = "1.11.1"
+rustfft = "6.2.0"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_yaml = "0.9.34"
 soapysdr = { version = "0.4.0", features = ["log"] }
@@ -37,6 +39,11 @@ zerocopy = "0.8.9"
 
 [dev-dependencies]
 rand = { version = "0.8.5", features = ["small_rng"] }
+
+[features]
+channel_power_2 = []
+
+default = ["channel_power_2"]
 
 [build-dependencies]
 cc = "1.1.31"
