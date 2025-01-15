@@ -1,5 +1,5 @@
-use hydro_strike::*;
 use hydro_strike::stream::Stream;
+use hydro_strike::*;
 
 #[test]
 fn test_sample_rx() {

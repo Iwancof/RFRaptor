@@ -1,5 +1,4 @@
 use hydro_strike::*;
-use hydro_strike::stream::Stream;
 
 use clap::Parser;
 
@@ -140,7 +139,7 @@ fn main() -> anyhow::Result<()> {
 
             loop {
                 let mut buffer = vec![num_complex::Complex32::default(); rx_stream.mtu().unwrap()];
-                let r = match rx_stream.read(&mut [&mut buffer], 1_000_000) {
+                let _r = match rx_stream.read(&mut [&mut buffer], 1_000_000) {
                     Ok(r) => r,
                     Err(_) => {
                         break;
