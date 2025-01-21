@@ -1,7 +1,7 @@
 use bluetooth::{BluetoothPacket, MacAddress, PacketInner};
 use burst::Burst;
 use color_eyre::owo_colors::OwoColorize;
-use hydro_strike::*;
+use rfraptor::*;
 use stream::{RxStream, Stream, TxStream};
 use useful_number::updatable_num::UpdateToMaxI64;
 

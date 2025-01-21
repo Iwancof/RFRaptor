@@ -2,4 +2,5 @@ devices:
 - !File
   direction: Rx
   # path: ./tests/test_sample_rx.txt
-  path: ./01-07-23-42.dat
+    # path: ./01-07-23-42.dat
+  path: /tmp/now.dat
