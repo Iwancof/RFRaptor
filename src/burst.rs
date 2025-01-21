@@ -18,7 +18,7 @@ impl Agc {
             .parse()
             .expect("AGC_THRESHOLD");
 
-        log::info!("AGC_THRESHOLD: {}", agc_threshold);
+        // log::info!("AGC_THRESHOLD: {}", agc_threshold);
 
         use liquid_dsp_sys::*;
         let crcf = unsafe {

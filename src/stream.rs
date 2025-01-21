@@ -42,6 +42,7 @@ pub enum ProcessFailKind {
 
 pub trait Stream {
     fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>>;
+    fn start_tx(&mut self) -> anyhow::Result<TxStream<crate::bluetooth::Bluetooth>>;
 }
 
 impl crate::device::Device {
@@ -284,6 +285,12 @@ impl crate::device::Device {
     }
 }
 
+impl Drop for crate::device::Device {
+    fn drop(&mut self) {
+        *self.running.lock().expect("failed to lock") = false;
+    }
+}
+
 impl Stream for crate::device::Device {
     fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>> {
         // sink/source Bluetooth Packet
@@ -307,6 +314,13 @@ impl Stream for crate::device::Device {
             source: packet_source,
         })
     }
+
+    fn start_tx(&mut self) -> anyhow::Result<TxStream<crate::bluetooth::Bluetooth>> {
+        // unimplemented!()
+        let (tx, _rx) = std::sync::mpsc::channel();
+
+        Ok(TxStream { sink: tx })
+    }
 }
 
 pub enum StreamResult {
@@ -316,7 +330,11 @@ pub enum StreamResult {
 }
 
 pub struct RxStream<ReceiveItem> {
-    source: std::sync::mpsc::Receiver<ReceiveItem>,
+    pub source: std::sync::mpsc::Receiver<ReceiveItem>,
+}
+
+pub struct TxStream<SendItem> {
+    pub sink: std::sync::mpsc::Sender<SendItem>,
 }
 
 impl<T> std::iter::Iterator for RxStream<T> {

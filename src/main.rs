@@ -1,4 +1,4 @@
-use hydro_strike::*;
+use rfraptor::*;
 
 use clap::Parser;
 
@@ -60,15 +60,21 @@ fn main() -> anyhow::Result<()> {
                     // log::info!("{:x?}", p.bytes_packet.bytes);
 
                     if let crate::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
-                        if adv.address
-                            == (bluetooth::MacAddress {
-                                // 18:09:d4:00:81:fb
-                                address: [0xfb, 0x81, 0x00, 0xd4, 0x09, 0x18],
-                            })
+                        // if adv.address
+                        //     == (bluetooth::MacAddress {
+                        //         // 18:09:d4:00:81:fb
+                        //         address: [0xfb, 0x81, 0x00, 0xd4, 0x09, 0x18],
+                        //     })
                         {
                             log::info!(
                                 "rssi = {}",
-                                p.bytes_packet.raw.unwrap().raw.unwrap().rssi_average
+                                p.bytes_packet
+                                    .unwrap()
+                                    .raw
+                                    .unwrap()
+                                    .raw
+                                    .unwrap()
+                                    .rssi_average
                             );
                             log::info!("{}", adv);
                         }
@@ -186,7 +192,13 @@ fn main() -> anyhow::Result<()> {
                         if finding_mac.contains(mac) {
                             log::info!(
                                 "rssi = {}",
-                                p.bytes_packet.raw.unwrap().raw.unwrap().rssi_average
+                                p.bytes_packet
+                                    .unwrap()
+                                    .raw
+                                    .unwrap()
+                                    .raw
+                                    .unwrap()
+                                    .rssi_average
                             );
                             log::info!("{}", adv);
                         }

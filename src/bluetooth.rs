@@ -1,5 +1,12 @@
 // use ice9_bindings::*;
 
+use core::fmt;
+use std::{
+    cell::OnceCell,
+    collections::HashMap,
+    sync::{LazyLock, OnceLock},
+};
+
 use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 
 use crate::bitops::BytePacket;
@@ -7,7 +14,7 @@ use crate::bitops::BytePacket;
 // TODO: いい感じに実装する
 #[derive(Debug, Clone)]
 pub struct Bluetooth {
-    pub bytes_packet: BytePacket,
+    pub bytes_packet: Option<BytePacket>,
 
     #[allow(unused)]
     pub packet: BluetoothPacket,
@@ -27,7 +34,7 @@ pub enum DecodeError {
     PacketNotFound,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct BluetoothPacket {
     pub inner: PacketInner,
 
@@ -35,13 +42,13 @@ pub struct BluetoothPacket {
     pub crc: [u8; 3],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub enum PacketInner {
     Advertisement(Advertisement),
     Unimplemented(u32),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct Advertisement {
     pub pdu_header: PDUHeader,
     pub length: u8,
@@ -49,12 +56,12 @@ pub struct Advertisement {
     pub data: Vec<AdvData>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MacAddress {
     pub address: [u8; 6],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub enum PDUType {
     AdvInd,
     AdvDirectInd,
@@ -66,19 +73,19 @@ pub enum PDUType {
     Unknown(u8),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct PDUHeader {
-    pdu_type: PDUType,
-    rfu: bool,
-    ch_sel: bool,
-    tx_add: bool,
-    rx_add: bool,
+    pub pdu_type: PDUType,
+    pub rfu: bool,
+    pub ch_sel: bool,
+    pub tx_add: bool,
+    pub rx_add: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct AdvData {
-    len: u8,
-    data: Vec<u8>,
+    pub len: u8,
+    pub data: Vec<u8>,
 }
 
 impl Bluetooth {
@@ -94,7 +101,7 @@ impl Bluetooth {
         // FIXME: unwrap will panic if slice is too short
 
         Ok(Self {
-            bytes_packet: byte_packet.clone(),
+            bytes_packet: Some(byte_packet.clone()),
             packet: BluetoothPacket {
                 inner: packet_inner,
                 crc,
@@ -184,6 +191,20 @@ impl Advertisement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash, serde::Deserialize)]
+pub struct CsvRecord {
+    #[serde(rename = "Mac Prefix")]
+    pub prefix: String,
+    #[serde(rename = "Vendor Name")]
+    pub vendor: String,
+    #[serde(rename = "Private")]
+    pub private: bool,
+    #[serde(rename = "Block Type")]
+    pub block_type: String,
+    #[serde(rename = "Last Update")]
+    pub last_update: String,
+}
+
 impl MacAddress {
     fn from_bytes(input: &[u8]) -> IResult<&[u8], Self> {
         let (input, address) = take(6u8)(input)?;
@@ -196,6 +217,41 @@ impl MacAddress {
                 ],
             },
         ))
+    }
+
+    pub fn database(&self) -> Option<CsvRecord> {
+        static DATABASE: LazyLock<HashMap<[u8; 3], CsvRecord>> = LazyLock::new(|| {
+            let mut reader = csv::Reader::from_path("./mac-vendors-export.csv").unwrap();
+            let mut map = HashMap::new();
+
+            for record in reader.deserialize() {
+                let record: CsvRecord = record.unwrap();
+                let prefix = record
+                    .prefix
+                    .split(':')
+                    .map(|x| u8::from_str_radix(x, 16).unwrap())
+                    .collect::<Vec<_>>();
+
+                map.insert([prefix[0], prefix[1], prefix[2]], record);
+            }
+
+            map.insert(
+                [0x12, 0x34, 0x56],
+                CsvRecord {
+                    prefix: "12:34:56".to_string(),
+                    vendor: "DemoVendor".to_string(),
+                    private: false,
+                    block_type: "MA-L".to_string(),
+                    last_update: "2025-01-17".to_string(),
+                },
+            );
+
+            map
+        });
+
+        (*DATABASE)
+            .get(&[self.address[5], self.address[4], self.address[3]])
+            .cloned()
     }
 }
 
