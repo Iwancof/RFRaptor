@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rutn-if-changed=liquid-dsp/libliquid.a");
+    println!("cargo:rerun-if-changed=liquid-dsp/libliquid.a");
 
     /*
     std::process::Command::new("sh")
@@ -16,7 +16,8 @@ fn main() {
 
     let bindgen = bindgen::Builder::default()
         .generate_comments(true)
-        .header(format!("{}/liquid-dsp/include/liquid.h", crate_dir));
+        .// header(format!("{}/liquid-dsp/include/liquid.h", crate_dir));
+        header(format!("/usr/local/include/liquid/liquid.h"));
 
     let bindgen = if env::var("CARGO_FEATURE_NUM_COMPLEX").is_ok() {
         // replace complex types with num-complex from bindgen
@@ -36,6 +37,6 @@ fn main() {
     // add library search path
     println!("cargo:rustc-link-search=native={}/liquid-dsp", crate_dir);
 
-    println!("cargo:rustc-link-lib=dylib=liquid");
+    println!("cargo:rustc-link-lib=static=liquid");
     println!("cargo:rustc-link-lib=dylib=fftw3f");
 }

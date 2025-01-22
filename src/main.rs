@@ -1,16 +1,26 @@
-#![feature(array_chunks)]
-#![feature(portable_simd)]
-#![feature(test)]
-#![feature(try_blocks)]
-#![feature(generic_arg_infer)]
+// #![feature(array_chunks)]
+// #![feature(portable_simd)]
+// #![feature(test)]
+// #![feature(try_blocks)]
+// #![feature(generic_arg_infer)]
+// 
+// mod bitops;
+// mod bluetooth;
+// mod burst;
+// mod channelizer;
+// mod device;
+// mod fsk;
+// mod liquid;
 
-mod bitops;
-mod bluetooth;
-mod burst;
-mod channelizer;
-mod device;
-mod fsk;
-mod liquid;
+#![feature(try_blocks)]
+
+use hydro_strike::bitops;
+use hydro_strike::bluetooth;
+use hydro_strike::burst;
+use hydro_strike::channelizer;
+use hydro_strike::device;
+use hydro_strike::fsk;
+use hydro_strike::liquid;
 
 use burst::Burst;
 use fsk::FskDemod;

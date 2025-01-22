@@ -1,5 +1,6 @@
+#![allow(unstable_features)]
 #![feature(test)]
-#![feature(portable_simd)]
+#![feature(try_blocks)]
 
 pub mod bitops;
 pub mod bluetooth;

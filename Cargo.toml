@@ -7,9 +7,9 @@ default-run = "hydro-strike"
 
 [profile.release]
 debug = 2
-lto = "fat"
+# lto = "fat"
 panic = "abort"
-codegen-units = 1
+# codegen-units = 1
 
 [dependencies]
 anyhow = { version = "1.0.86", features = ["backtrace"] }
@@ -36,7 +36,6 @@ soapysdr = { version = "0.4.0", features = ["log"] }
 thread-priority = "1.1.0"
 tungstenite = "0.24.0"
 useful_number = "0.1.2"
-wrcap = { version = "0.1.0", path = "../../../Rust/wrcap" }
 zerocopy = "0.8.9"
 
 [dev-dependencies]
