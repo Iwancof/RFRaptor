@@ -197,3 +197,30 @@ mod tests {
         assert!(rmes < 1e-3);
     }
 }
+
+#[cfg(test)]
+mod bench {
+    use super::*;
+    use rand::prelude::*;
+
+    extern crate test;
+
+    #[bench]
+    fn channelize_fft_100000(b: &mut test::Bencher) {
+        let channel = 16;
+        let m = 4;
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let mut magic = Channelizer::new(channel);
+        let data = (0..16 * 100000)
+            .map(|_| Complex::new(rng.gen(), rng.gen()))
+            .collect::<Vec<_>>();
+
+        b.iter(|| {
+            for chunk in data.chunks_exact(channel / 2) {
+                magic.channelize(chunk);
+            }
+        });
+    }
+}

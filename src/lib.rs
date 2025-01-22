@@ -1,3 +1,5 @@
+#![feature(test)]
+
 pub mod bitops;
 pub mod bluetooth;
 pub mod burst;
