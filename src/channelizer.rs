@@ -499,6 +499,9 @@ mod test {
 
     extern crate test;
 
+    use std::simd::*;
+
+/*
     #[bench]
     fn channelize_fft_100000(b: &mut test::Bencher) {
         let channel = 16;
@@ -516,6 +519,148 @@ mod test {
             for chunk in data.chunks_exact(channel / 2) {
                 magic.channelize_fft(chunk);
             }
+        });
+    }
+    */
+    
+    #[bench]
+    fn use_naive_implementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut re = 0;
+            let mut im = 0;
+
+            for idx in 0..8 {
+                // re += r[pos + idx] * filter[idx];
+                // im += i[pos + idx] * filter[idx];
+                re = re.wrapping_add(&r[pos + idx].wrapping_mul(filter[idx]));
+                im = im.wrapping_add(&i[pos + idx].wrapping_mul(filter[idx]));
+            }
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_c_imeplementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8(r: *const i32, i: *const i32, h: *const i32, out: *mut i32);
+        }
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut out = [0i32; 2];
+            unsafe {
+                dotprod_8(
+                    r.as_ptr().add(pos),
+                    i.as_ptr().add(pos),
+                    filter.as_ptr(),
+                    out.as_mut_ptr(),
+                );
+            }
+
+            let [re, im] = out;
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_c_horiz_imeplementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        #[link(name = "apply_filter", kind = "static")]
+        extern "C" {
+            fn dotprod_8_horiz(r: *const i32, i: *const i32, h: *const i32, out: *mut i32);
+        }
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let mut out = [0i32; 2];
+            unsafe {
+                dotprod_8_horiz(
+                    r.as_ptr().add(pos),
+                    i.as_ptr().add(pos),
+                    filter.as_ptr(),
+                    out.as_mut_ptr(),
+                );
+            }
+
+            let [re, im] = out;
+
+            test::black_box(re);
+            test::black_box(im);
+        });
+    }
+
+    #[bench]
+    fn use_rust_simd_implementation(b: &mut test::Bencher) {
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+
+        let r = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+        let i = (0..100).map(|_| rng.gen::<i32>()).collect::<Vec<_>>();
+
+        let filter = vec![1, 2, 3, 4, 5, 6, 7, 8];
+
+        b.iter(|| {
+            let pos: usize = rng.gen_range(0..90usize);
+
+            let h = i32x8::load_or_default(filter.as_slice());
+            let r = i32x8::load_or_default(&r[pos..]);
+            let i = i32x8::load_or_default(&i[pos..]);
+
+            let r = r * h;
+            let i = i * h;
+
+            let [r0, r1, r2, r3, r4, r5, r6, r7] = r.to_array();
+            let [i0, i1, i2, i3, i4, i5, i6, i7] = i.to_array();
+
+            use core::num::Wrapping;
+
+            let re = Wrapping(r0)
+                + Wrapping(r1)
+                + Wrapping(r2)
+                + Wrapping(r3)
+                + Wrapping(r4)
+                + Wrapping(r5)
+                + Wrapping(r6)
+                + Wrapping(r7);
+            let im = Wrapping(i0)
+                + Wrapping(i1)
+                + Wrapping(i2)
+                + Wrapping(i3)
+                + Wrapping(i4)
+                + Wrapping(i5)
+                + Wrapping(i6)
+                + Wrapping(i7);
+
+            test::black_box(re);
+            test::black_box(im);
         });
     }
 }
