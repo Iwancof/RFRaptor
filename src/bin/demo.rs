@@ -1,23 +1,17 @@
-use bluetooth::{BluetoothPacket, MacAddress, PacketInner};
-use burst::Burst;
-use color_eyre::owo_colors::OwoColorize;
 use rfraptor::*;
+
+use bluetooth::{MacAddress, PacketInner};
 use stream::{RxStream, Stream, TxStream};
-use useful_number::updatable_num::UpdateToMaxI64;
 
 use std::{
     collections::HashMap,
-    fmt::write,
     sync::mpsc::{Receiver, Sender},
     thread,
     time::Duration,
 };
 
 use ratatui::{
-    crossterm::{
-        event::{self, Event, KeyCode},
-        terminal,
-    },
+    crossterm::event::{self, Event, KeyCode},
     layout::{self, Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
@@ -83,6 +77,12 @@ impl VirtualStream {
     }
 }
 
+impl Default for VirtualStream {
+    fn default() -> Self {
+        VirtualStream::new()
+    }
+}
+
 impl Stream for VirtualStream {
     fn start_rx(&mut self) -> anyhow::Result<RxStream<crate::bluetooth::Bluetooth>> {
         match self {
@@ -125,16 +125,9 @@ impl Stream for VirtualStream {
     }
 }
 
-#[derive(Debug)]
-struct Packet {
-    src: Option<bluetooth::MacAddress>,
-
-    packet: bluetooth::Bluetooth,
-}
-
 enum ExploitBuilderHandleResult {
     Catched,
-    Packet(bluetooth::Bluetooth),
+    Packet(Box<bluetooth::Bluetooth>),
     Fallthrough,
 }
 
@@ -171,6 +164,7 @@ struct App {
     tx_monitor: TxStream<crate::bluetooth::Bluetooth>,
     tx_desc: String,
 
+    #[allow(unused)] // for drop
     device: Box<dyn Stream>,
 
     src: MacAddress,
@@ -306,10 +300,10 @@ impl App {
                 x.bytes_packet.as_ref().and_then(|x| {
                     x.raw
                         .as_ref()
-                        .and_then(|x| x.raw.as_ref().and_then(|x| Some(x.rssi_average)))
+                        .and_then(|x| x.raw.as_ref().map(|x| x.rssi_average))
                 })
             })
-            .fold(Some(0.), |acc: Option<f32>, x| Some(acc? + x?));
+            .try_fold(0., |v: f32, acc: Option<f32>| Some(v + acc?));
 
         rssi.map(|x| x / packets.len() as f32)
     }
@@ -354,9 +348,9 @@ impl App {
 
                 let num_content = match num_packets {
                     ..10 => num_content.fg(Color::DarkGray),
-                    ..30 => num_content.fg(Color::White),
-                    ..50 => num_content.fg(Color::Yellow),
-                    ..100 => num_content.fg(Color::Magenta),
+                    10..30 => num_content.fg(Color::White),
+                    30..50 => num_content.fg(Color::Yellow),
+                    50..100 => num_content.fg(Color::Magenta),
                     _ => num_content.fg(Color::Red),
                 };
 
@@ -462,12 +456,7 @@ impl App {
                         .iter()
                         .map(|x| {
                             let mut idx = ((x + 30.) / 4.) as isize;
-                            if idx > 9 {
-                                idx = 9;
-                            }
-                            if idx < 0 {
-                                idx = 0;
-                            }
+                            idx = idx.clamp(0, 9);
 
                             graph_symbols[idx as usize].clone()
                         })
@@ -480,10 +469,7 @@ impl App {
                         .iter()
                         .map(|x| {
                             let mut idx = (*x as f32 / 2.) as usize;
-
-                            if idx > 9 {
-                                idx = 9;
-                            }
+                            idx = idx.clamp(0, 9);
 
                             graph_symbols[idx].clone()
                         })
@@ -673,9 +659,10 @@ impl App {
 
         let rf_info = target.bytes_packet.as_ref().and_then(|byte_packet| {
             byte_packet.raw.as_ref().and_then(|fsk_packet| {
-                fsk_packet.raw.as_ref().and_then(|burst_packet| {
-                    Some((burst_packet.rssi_average, burst_packet.timestamp))
-                })
+                fsk_packet
+                    .raw
+                    .as_ref()
+                    .map(|burst_packet| (burst_packet.rssi_average, burst_packet.timestamp))
             })
         });
 
@@ -725,7 +712,7 @@ impl App {
                                     if x.is_ascii() && x.is_ascii_alphanumeric() {
                                         format!("{}", *x as char)
                                     } else {
-                                        format!(".")
+                                        ".".to_string()
                                     }
                                 })
                                 .collect::<Vec<String>>()
@@ -894,7 +881,7 @@ impl App {
                                 return Ok(false);
                             }
                             ExploitBuilderHandleResult::Packet(packet) => {
-                                self.tx_monitor.sink.send(packet).unwrap();
+                                self.tx_monitor.sink.send(*packet).unwrap();
                             }
                             ExploitBuilderHandleResult::Fallthrough => {}
                         }
@@ -1023,7 +1010,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match key {
                 KeyCode::Enter => {
                     self.count += 1;
-                    ExploitBuilderHandleResult::Packet(self.packet.clone())
+                    ExploitBuilderHandleResult::Packet(Box::new(self.packet.clone()))
                 }
                 _ => ExploitBuilderHandleResult::Fallthrough,
             }
@@ -1079,7 +1066,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let content = List::new(content).block(Block::bordered().title("Source"));
             frame.render_widget(content, src_info);
 
-            let content = Line::from(Span::raw(format!("{}", self.cmd)))
+            let content = Line::from(Span::raw(self.cmd.to_string()))
                 .fg(Color::Yellow)
                 .bold();
             let content = List::new(content).block(Block::bordered().title("Send Command"));
@@ -1104,7 +1091,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                         format!("backdoor:{}", self.cmd).into_bytes(),
                     );
-                    ExploitBuilderHandleResult::Packet(packet)
+                    ExploitBuilderHandleResult::Packet(Box::new(packet))
                 }
                 _ => ExploitBuilderHandleResult::Fallthrough,
             }
@@ -1209,8 +1196,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             let mut cmd = cmd.split_whitespace();
                             let mut process = std::process::Command::new(cmd.next().unwrap());
-                            while let Some(arg) = cmd.next() {
-                                process.arg(arg);
+
+                            for c in cmd {
+                                process.arg(c);
                             }
 
                             let stdout = process
@@ -1236,7 +1224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         app.eat();
 
-        if app.addresses.len() == 0 {
+        if app.addresses.is_empty() {
             continue;
         }
 

@@ -1,5 +1,5 @@
-use hydro_strike::stream::Stream;
-use hydro_strike::*;
+use rfraptor::stream::Stream;
+use rfraptor::*;
 
 #[test]
 fn test_sample_rx() {
@@ -18,12 +18,12 @@ fn test_sample_rx() {
 
     let mut rx = device::open_device(config).expect("Failed to open device");
 
-    let packets: Vec<hydro_strike::bluetooth::Bluetooth> =
+    let packets: Vec<rfraptor::bluetooth::Bluetooth> =
         rx[0].start_rx().expect("Failed to start rx").collect();
 
     assert_eq!(packets.len(), 4);
 
-    use hydro_strike::bluetooth::MacAddress;
+    use rfraptor::bluetooth::MacAddress;
     let test_mac = [
         MacAddress {
             address: [0x1f, 0x6e, 0x9a, 0x98, 0x48, 0xf6],
@@ -40,7 +40,7 @@ fn test_sample_rx() {
     ];
 
     for (p, m) in packets.iter().zip(test_mac.iter()) {
-        if let hydro_strike::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
+        if let rfraptor::bluetooth::PacketInner::Advertisement(ref adv) = p.packet.inner {
             assert_eq!(adv.address, *m);
         }
     }

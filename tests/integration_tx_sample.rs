@@ -1,4 +1,4 @@
-use hydro_strike::*;
+use rfraptor::*;
 
 #[test]
 fn fsk_bits() {

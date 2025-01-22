@@ -1,11 +1,6 @@
 // use ice9_bindings::*;
 
-use core::fmt;
-use std::{
-    cell::OnceCell,
-    collections::HashMap,
-    sync::{LazyLock, OnceLock},
-};
+use std::{collections::HashMap, sync::LazyLock};
 
 use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 
