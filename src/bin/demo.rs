@@ -5,6 +5,7 @@ use stream::{RxStream, Stream, TxStream};
 
 use std::{
     collections::HashMap,
+    io::BufWriter,
     sync::mpsc::{Receiver, Sender},
     thread,
     time::Duration,
@@ -169,6 +170,8 @@ struct App {
 
     src: MacAddress,
 
+    pub censored: bool,
+
     // databases
     // packets: PacketDB,
     packets: HashMap<Option<MacAddress>, Vec<bluetooth::Bluetooth>>,
@@ -204,6 +207,8 @@ impl App {
                 address: [0x00, 0x01, 0x00, 0x56, 0x34, 0x12],
             },
 
+            censored: false,
+
             packets: HashMap::new(),
             addresses: Vec::new(),
             exploits: Vec::new(),
@@ -232,6 +237,8 @@ impl App {
             src: MacAddress {
                 address: [0x00, 0x01, 0x00, 0x56, 0x34, 0x12],
             },
+
+            censored: false,
 
             packets: HashMap::new(),
             addresses: Vec::new(),
@@ -308,7 +315,40 @@ impl App {
         rssi.map(|x| x / packets.len() as f32)
     }
 
+    fn mac_to_span(censored: bool, mac: &Option<MacAddress>) -> Span {
+        match mac {
+            Some(mac) => {
+                let mut mac_str = format!("{:<17}", mac);
+                if censored {
+                    mac_str.replace_range(9.., "XX:XX:XX");
+                }
+
+                Span::raw(mac_str).fg(if mac.database().is_some() {
+                    Color::Red
+                } else {
+                    Color::Reset
+                })
+
+                // if censored {
+                //     Span::raw("XX:XX:XX:XX:XX:XX").fg(if mac.database().is_some() {
+                //         Color::Red
+                //     } else {
+                //         Color::Reset
+                //     })
+                // } else {
+                //     Span::raw(format!("{:<17}", mac)).fg(if mac.database().is_some() {
+                //         Color::Red
+                //     } else {
+                //         Color::Reset
+                //     })
+                // }
+            }
+            None => Span::raw(format!("{:<17}", "Unknown")).fg(Color::Yellow),
+        }
+    }
+
     fn layout_devices(&mut self, frame: &mut Frame, devices: layout::Rect) {
+        let censor = self.censored;
         let items: Vec<ListItem> = self
             .addresses
             .iter()
@@ -318,16 +358,7 @@ impl App {
 
                 span.push(Span::raw(format!("{:>3} ", i)));
 
-                span.push(match k {
-                    Some(mac) => {
-                        Span::raw(format!("{:<17}", mac)).fg(if mac.database().is_some() {
-                            Color::Red
-                        } else {
-                            Color::Reset
-                        })
-                    }
-                    None => Span::raw(format!("{:<17}", "Unknown")).fg(Color::Yellow),
-                });
+                span.push(Self::mac_to_span(censor, k));
 
                 if let Some(rssi) = self.get_average_rssi(k) {
                     let mut rssi_content = Span::raw(format!("{:>7.2} dB", rssi));
@@ -522,15 +553,38 @@ impl App {
             })
             .collect();
 
-        let description = if self.devices_focused {
-            Line::from(Span::raw(format!(
-                "  {:>3} {:>17} {:>7}   {:>4}       {:>4} {:>20} {:>20} {:>10} {:>10}",
-                "IDX", "MAC", "RSSI", "PACKETS", "TIME", "RSSI_GRAPH", "PACK_GRAPH", "CFO", "DEV"
-            )))
+        let description = if self
+            .packets
+            .get(self.addresses.first().unwrap())
+            .unwrap()
+            .first()
+            .unwrap()
+            .bytes_packet
+            .is_some()
+        {
+            if self.devices_focused {
+                Line::from(Span::raw(format!(
+                    "  {:>3} {:>17} {:>7}   {:>4}       {:>4} {:>20} {:>20} {:>10} {:>10}",
+                    "IDX",
+                    "MAC",
+                    "RSSI",
+                    "PACKETS",
+                    "TIME",
+                    "RSSI_GRAPH",
+                    "PACK_GRAPH",
+                    "CFO",
+                    "DEV"
+                )))
+            } else {
+                Line::from(Span::raw(format!(
+                    "  {:>3} {:>17} {:>7}   {:>4}       {:>4}",
+                    "IDX", "MAC", "RSSI", "PACKETS", "TIME",
+                )))
+            }
         } else {
             Line::from(Span::raw(format!(
-                "  {:>3} {:>17} {:>7}   {:>4}       {:>4}",
-                "IDX", "MAC", "RSSI", "PACKETS", "TIME",
+                "  {:>3} {:>17} {:>4}",
+                "IDX", "MAC", "PACKETS",
             )))
         };
 
@@ -570,7 +624,7 @@ impl App {
 
         let mut content = match target {
             Some(ref mac) => {
-                let mut line = vec![Line::from(Span::raw(format!("{mac}")))];
+                let mut line = vec![Line::from(Self::mac_to_span(self.censored, &target))];
                 let info = mac.database();
                 match info {
                     Some(info) => {
@@ -617,8 +671,17 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, packet)| {
+                let mut exploited = false;
                 let content = match &packet.packet.inner {
                     bluetooth::PacketInner::Advertisement(adv) => {
+                        if !adv.data.is_empty() {
+                            if let Ok(s) = String::from_utf8(adv.data[0].data.clone()) {
+                                if s.starts_with("exploited") {
+                                    exploited = true;
+                                }
+                            }
+                        }
+
                         let mut data = String::new();
                         data.push_str(&format!(
                             "{:>3} {}: {} packet(s)",
@@ -632,9 +695,13 @@ impl App {
                     bluetooth::PacketInner::Unimplemented(x) => {
                         format!("{:>3} Unimplemented: 0x{:x}", i, x)
                     }
-                }
-                .fg(Color::Reset);
-                ListItem::new(content)
+                };
+                // .fg(if exploited { Color::Red } else { Color::Reset });
+                ListItem::new(content).style(if exploited {
+                    Style::default().fg(Color::Red).bold()
+                } else {
+                    Style::default().fg(Color::Reset)
+                })
             })
             .collect();
 
@@ -831,7 +898,7 @@ impl App {
         }
 
         if self.exploit_selected {
-            let area = popup_area(frame.area(), 50, 50);
+            let area = popup_area(frame.area(), 70, 95);
             frame.render_widget(Clear, area);
 
             let addr = self.selected_address().clone();
@@ -894,6 +961,9 @@ impl App {
                             } else {
                                 return Ok(true);
                             }
+                        }
+                        KeyCode::Char('c') => {
+                            self.censored = !self.censored;
                         }
                         KeyCode::Char('d') => {
                             self.window_selected = Window::Devices;
@@ -966,8 +1036,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut devices = device::open_device(device::config::List {
             devices: vec![device::config::Device::HackRF {
                 direction: "Rx".to_string(),
-                freq_mhz: 2427,
-                serial: "0000000000000000f77c60dc259132c3".to_string(), // serial: "0000000000000000436c63dc38276e63".to_string(),
+                freq_mhz: 2480,
+                // serial: "0000000000000000f77c60dc259132c3".to_string(),
+                serial: "0000000000000000436c63dc38276e63".to_string(),
             }],
         })
         .unwrap();
@@ -1125,7 +1196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     app.exploits.push(ExploitContainer {
-        name: "Greetings".to_string(),
+        name: "CVE-xxxx-xxx: Greeting".to_string(),
         description: "Send a greeting message".to_string(),
         exploit: Box::new(SimplePacketExploit {
             count: 0,
@@ -1139,7 +1210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     app.exploits.push(ExploitContainer {
-        name: "OS Command Injection".to_string(),
+        name: "CVE-xxxx-xxx: OS Command Injection".to_string(),
         description: "Send command".to_string(),
         exploit: Box::new(OSCommandInjection {
             count: 0,
@@ -1147,15 +1218,156 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     });
 
-    let mut alice = VirtualStream::new();
+    #[derive(Debug)]
+    struct BrokenPacket {
+        packet: bluetooth::PacketInner,
+    }
+
+    impl BrokenPacket {
+        fn new() -> Self {
+            Self {
+                packet: bluetooth::PacketInner::Advertisement(bluetooth::Advertisement {
+                    pdu_header: bluetooth::PDUHeader {
+                        pdu_type: bluetooth::PDUType::AdvInd,
+                        rfu: false,
+                        ch_sel: false,
+                        tx_add: false,
+                        rx_add: false,
+                    },
+                    length: 0,
+                    address: bluetooth::MacAddress {
+                        address: [0x00, 0x01, 0x00, 0x56, 0x34, 0x12],
+                    },
+                    data: vec![bluetooth::AdvData {
+                        len: 0,
+                        data: vec![],
+                    }],
+                }),
+            }
+        }
+    }
+
+    impl PopupExploitBuilder for BrokenPacket {
+        fn layout(
+            &mut self,
+            src: MacAddress,
+            dest_addr: Option<MacAddress>,
+            frame: &mut Frame,
+            area: layout::Rect,
+        ) {
+            let exploit_area = Block::bordered()
+                .border_style(Style::default().fg(Color::Green))
+                .title("Exploit")
+                .title_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
+            frame.render_widget(exploit_area, area);
+
+            let area = area.inner(layout::Margin {
+                horizontal: 1,
+                vertical: 1,
+            });
+
+            let [info, packet_area] = Layout::vertical([
+                Constraint::Length(3), // destination
+                Constraint::Min(0),    // packet area
+            ])
+            .areas(area);
+
+            let [src_info, dest_info] =
+                Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).areas(info);
+
+            let content = List::new(Line::from(Span::raw(
+                dest_addr
+                    .map(|x| format!("{x}"))
+                    .unwrap_or("Unknown".to_string()),
+            )))
+            .block(Block::bordered().title("Destination"));
+            frame.render_widget(content, dest_info);
+
+            let content = Line::from(Span::raw(format!("{src}")))
+                .fg(Color::Yellow)
+                .bold();
+            let content = List::new(content).block(Block::bordered().title("Source"));
+            frame.render_widget(content, src_info);
+
+            // render packet
+            use std::io::Write;
+            let mut packet_content = BufWriter::new(Vec::new());
+            write!(packet_content, "{:#x?}", self.packet).unwrap();
+
+            let packet_content =
+                Paragraph::new(String::from_utf8(packet_content.into_inner().unwrap()).unwrap())
+                    .block(Block::bordered().title("Packet"))
+                    .wrap(Wrap { trim: false });
+
+            frame.render_widget(packet_content, packet_area);
+        }
+        fn handle_events(&mut self, key: KeyCode) -> ExploitBuilderHandleResult {
+            match key {
+                KeyCode::Up => {
+                    if let bluetooth::PacketInner::Advertisement(adv) = &mut self.packet {
+                        adv.data[0].len += 1;
+                    }
+                    ExploitBuilderHandleResult::Catched
+                }
+                KeyCode::Down => {
+                    if let bluetooth::PacketInner::Advertisement(adv) = &mut self.packet {
+                        adv.data[0].len -= 1;
+                    }
+                    ExploitBuilderHandleResult::Catched
+                }
+
+                KeyCode::Left => {
+                    if let bluetooth::PacketInner::Advertisement(adv) = &mut self.packet {
+                        adv.data[0].data.pop();
+                    }
+                    ExploitBuilderHandleResult::Catched
+                }
+
+                KeyCode::Right => {
+                    if let bluetooth::PacketInner::Advertisement(adv) = &mut self.packet {
+                        let c = adv.data[0].data.len() as u8;
+                        adv.data[0].data.push(c + 1);
+                    }
+                    ExploitBuilderHandleResult::Catched
+                }
+
+                KeyCode::Enter => {
+                    ExploitBuilderHandleResult::Packet(Box::new(bluetooth::Bluetooth {
+                        bytes_packet: None,
+                        packet: bluetooth::BluetoothPacket {
+                            inner: self.packet.clone(),
+                            crc: [0, 0, 0],
+                        },
+                        remain: Vec::new(),
+                        freq: 2427,
+                    }))
+                }
+
+                _ => ExploitBuilderHandleResult::Fallthrough,
+            }
+        }
+    }
+
+    app.exploits.push(ExploitContainer {
+        name: "CVE-xxxx-xxx: broken packet".to_string(),
+        description: "Send broken packet".to_string(),
+        exploit: Box::new(BrokenPacket::new()),
+    });
+
+    // let mut alice = VirtualStream::new();
     let mut bob = VirtualStream::new();
 
     if !real_rf {
+        /*
         let _alice_handle = thread::Builder::new()
             .name("Alice".to_string())
             .spawn(move || {
                 let address = bluetooth::MacAddress {
-                    address: [0x01, 0x00, 0x00, 0x56, 0x34, 0x12],
+                    address: [0x02, 0x00, 0x00, 0x56, 0x34, 0x12],
                 };
 
                 let _rx = alice.start_rx().unwrap();
@@ -1163,19 +1375,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 for i in 0.. {
                     let packet =
-                        demo_adv_packet(address.clone(), format!("Alice: {}", i).into_bytes());
+                        demo_adv_packet(address.clone(), format!("Alice{}", i).into_bytes());
                     tx.sink.send(packet).unwrap();
 
                     thread::sleep(Duration::from_secs(1));
                 }
                 //
             });
+        */
 
         let _bob_handle = thread::Builder::new()
             .name("Bob".to_string())
             .spawn(move || {
                 let address = bluetooth::MacAddress {
-                    address: [0x02, 0x00, 0x00, 0x56, 0x34, 0x12],
+                    address: [0x01, 0x00, 0x00, 0x56, 0x34, 0x12],
                 };
 
                 let rx = bob.start_rx().unwrap();
@@ -1188,29 +1401,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // echo server
                 for packet in rx.source.iter() {
                     if let bluetooth::PacketInner::Advertisement(adv) = packet.packet.inner {
-                        let data = String::from_utf8_lossy(&adv.data[0].data).to_string();
+                        if adv.data[0].len as usize != adv.data[0].data.len() {
+                            let packet = demo_adv_packet(
+                                address.clone(),
+                                b"exploited:BUFFER_OVER_FLOW".to_vec(),
+                            );
+                            tx.sink.send(packet).unwrap();
+                        } else {
+                            let data = String::from_utf8_lossy(&adv.data[0].data).to_string();
 
-                        // backdoor
-                        if data.starts_with("backdoor:") {
-                            let cmd = data.trim_start_matches("backdoor:");
+                            // backdoor
+                            if data.starts_with("backdoor:") {
+                                let cmd = data.trim_start_matches("backdoor:");
 
-                            let mut cmd = cmd.split_whitespace();
-                            let mut process = std::process::Command::new(cmd.next().unwrap());
+                                let mut cmd = cmd.split_whitespace();
+                                let mut process = std::process::Command::new(cmd.next().unwrap());
 
-                            for c in cmd {
-                                process.arg(c);
+                                for c in cmd {
+                                    process.arg(c);
+                                }
+
+                                let stdout = process
+                                    .output()
+                                    .map(|x| x.stdout)
+                                    .unwrap_or(b"Command Fail".to_vec());
+                                let mut prefix = b"exploited:".to_vec();
+                                prefix.extend(stdout);
+                                let packet = demo_adv_packet(address.clone(), prefix);
+
+                                tx.sink.send(packet).unwrap();
+                            } else if data.starts_with("hello:") {
+                                let packet =
+                                    demo_adv_packet(address.clone(), b"HelloWorld".to_vec());
+                                tx.sink.send(packet).unwrap();
                             }
-
-                            let stdout = process
-                                .output()
-                                .map(|x| x.stdout)
-                                .unwrap_or(b"Command Fail".to_vec());
-                            let packet = demo_adv_packet(address.clone(), stdout);
-
-                            tx.sink.send(packet).unwrap();
-                        } else if data.starts_with("hello:") {
-                            let packet = demo_adv_packet(address.clone(), b"Hello: World".to_vec());
-                            tx.sink.send(packet).unwrap();
                         }
                     }
                 }

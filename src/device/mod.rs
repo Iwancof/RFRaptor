@@ -69,6 +69,7 @@ fn direction_from_str(s: &str) -> anyhow::Result<Vec<Direction>> {
 }
 
 const NUM_CHANNELS: usize = 16usize;
+// const NUM_CHANNELS: usize = 2usize;
 
 fn open_hackrf(config: config::Device) -> anyhow::Result<Device> {
     let driver = "hackrf";
